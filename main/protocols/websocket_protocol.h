@@ -3,6 +3,7 @@
 
 
 #include "protocol.h"
+#include "config.h"
 
 #include <web_socket.h>
 #include <freertos/FreeRTOS.h>
@@ -20,11 +21,14 @@ public:
     bool OpenAudioChannel() override;
     void CloseAudioChannel() override;
     bool IsAudioChannelOpened() const override;
+    
+    // 新增方法：使用指定的URL和token打开音频通道
+    bool OpenAudioChannelWithToken(const std::string& url, const std::string& token, int version = 1);
 
 private:
     EventGroupHandle_t event_group_handle_;
     std::unique_ptr<WebSocket> websocket_;
-    int version_ = 1;
+    int version_ = WEBSOCKET_PROTOCOL_VERSION;
 
     void ParseServerHello(const cJSON* root);
     bool SendText(const std::string& text) override;

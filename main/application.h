@@ -15,6 +15,8 @@
 #include "ota.h"
 #include "audio_service.h"
 #include "device_state_event.h"
+#include "protocols/http_login.h"
+#include "protocols/config.h"
 
 
 #define MAIN_EVENT_SCHEDULE (1 << 0)
@@ -64,6 +66,12 @@ public:
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
 
+    // 新增方法：处理登录成功后的逻辑
+    void OnLoginSuccess(const char* token);
+    
+    // 新增静态方法：用于C风格回调
+    static void OnLoginSuccessCallback(const char* token);
+
 private:
     Application();
     ~Application();
@@ -84,6 +92,9 @@ private:
     int clock_ticks_ = 0;
     TaskHandle_t check_new_version_task_handle_ = nullptr;
     TaskHandle_t main_event_loop_task_handle_ = nullptr;
+
+    // 新增成员变量：WebSocket服务器地址
+    std::string websocket_server_url_ = WEBSOCKET_SERVER_URL; // 使用配置文件中的WebSocket服务器地址
 
     void OnWakeWordDetected();
     void CheckNewVersion(Ota& ota);

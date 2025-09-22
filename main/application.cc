@@ -345,72 +345,18 @@ void Application::StopListening() {
     });
 }
 
-void Application::Start() {
+
+void Application::OnLoginSuccess(const char* token) {
+    ESP_LOGI(TAG, "Login successful, token: %s", token);
+    
     auto& board = Board::GetInstance();
-    SetDeviceState(kDeviceStateStarting);
-
-    /* Setup the display */
     auto display = board.GetDisplay();
-
-    // Print board name/version info
-    display->SetChatMessage("system", SystemInfo::GetUserAgent().c_str());
-
-    /* Setup the audio service */
-    auto codec = board.GetAudioCodec();
-    audio_service_.Initialize(codec);
-    audio_service_.Start();
-
-    AudioServiceCallbacks callbacks;
-    callbacks.on_send_queue_available = [this]() {
-        xEventGroupSetBits(event_group_, MAIN_EVENT_SEND_AUDIO);
-    };
-    callbacks.on_wake_word_detected = [this](const std::string& wake_word) {
-        xEventGroupSetBits(event_group_, MAIN_EVENT_WAKE_WORD_DETECTED);
-    };
-    callbacks.on_vad_change = [this](bool speaking) {
-        xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
-    };
-    audio_service_.SetCallbacks(callbacks);
-
-    // Start the main event loop task with priority 3
-    xTaskCreate([](void* arg) {
-        ((Application*)arg)->MainEventLoop();
-        vTaskDelete(NULL);
-    }, "main_event_loop", 2048 * 4, this, 3, &main_event_loop_task_handle_);
-
-    /* Start the clock timer to update the status bar */
-    esp_timer_start_periodic(clock_timer_handle_, 1000000);
-
-    /* Wait for the network to be ready */
-    board.StartNetwork();
-
-    // Update the status bar immediately to show the network state
-    display->UpdateStatusBar(true);
-
-    // Check for new assets version
-    CheckAssetsVersion();
-
-    // Check for new firmware version or get the MQTT broker address
-    Ota ota;
-    CheckNewVersion(ota);
-
-    // Initialize the protocol
-    display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
-
-    // Add MCP common tools before initializing the protocol
-    auto& mcp_server = McpServer::GetInstance();
-    mcp_server.AddCommonTools();
-    mcp_server.AddUserOnlyTools();
-
-    if (ota.HasMqttConfig()) {
-        protocol_ = std::make_unique<MqttProtocol>();
-    } else if (ota.HasWebsocketConfig()) {
-        protocol_ = std::make_unique<WebsocketProtocol>();
-    } else {
-        ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT");
-        protocol_ = std::make_unique<MqttProtocol>();
-    }
-
+    auto codec = board.GetAudioCodec();  // 添加codec声明
+    
+    // 初始化WebSocket协议
+    protocol_ = std::make_unique<WebsocketProtocol>();
+    
+    // 设置协议回调
     protocol_->OnConnected([this]() {
         DismissAlert();
     });
@@ -419,11 +365,13 @@ void Application::Start() {
         last_error_message_ = message;
         xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
     });
+    
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
         if (device_state_ == kDeviceStateSpeaking) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet));
         }
     });
+    
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
         board.SetPowerSaveMode(false);
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
@@ -431,6 +379,7 @@ void Application::Start() {
                 protocol_->server_sample_rate(), codec->output_sample_rate());
         }
     });
+    
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveMode(true);
         Schedule([this]() {
@@ -439,6 +388,7 @@ void Application::Start() {
             SetDeviceState(kDeviceStateIdle);
         });
     });
+    
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
         // Parse JSON data
         auto type = cJSON_GetObjectItem(root, "type");
@@ -528,19 +478,92 @@ void Application::Start() {
             ESP_LOGW(TAG, "Unknown message type: %s", type->valuestring);
         }
     });
-    bool protocol_started = protocol_->Start();
+    
+    // 启动协议并打开音频通道
+    if (protocol_->Start()) {
+        // 对于WebSocket协议，我们需要打开音频通道
+        WebsocketProtocol* ws_protocol = dynamic_cast<WebsocketProtocol*>(protocol_.get());
+        if (ws_protocol) {
+            // 使用固定的WebSocket服务器地址和获取到的token
+            if (ws_protocol->OpenAudioChannelWithToken(websocket_server_url_, token)) {
+                SystemInfo::PrintHeapStats();
+                SetDeviceState(kDeviceStateIdle);
 
-    SystemInfo::PrintHeapStats();
-    SetDeviceState(kDeviceStateIdle);
-
-    has_server_time_ = ota.HasServerTime();
-    if (protocol_started) {
-        std::string message = std::string(Lang::Strings::VERSION) + ota.GetCurrentVersion();
-        display->ShowNotification(message.c_str());
-        display->SetChatMessage("system", "");
-        // Play the success sound to indicate the device is ready
-        audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+                display->SetChatMessage("system", "WebSocket连接成功");
+                // Play the success sound to indicate the device is ready
+                audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+            } else {
+                ESP_LOGE(TAG, "Failed to open WebSocket audio channel");
+                Alert(Lang::Strings::ERROR, "WebSocket连接失败", "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
+            }
+        }
+    } else {
+        ESP_LOGE(TAG, "Failed to start WebSocket protocol");
+        Alert(Lang::Strings::ERROR, "协议启动失败", "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
     }
+}
+
+void Application::Start() {
+    auto& board = Board::GetInstance();
+    SetDeviceState(kDeviceStateStarting);
+
+    /* Setup the display */
+    auto display = board.GetDisplay();
+
+    // Print board name/version info
+    display->SetChatMessage("system", SystemInfo::GetUserAgent().c_str());
+
+    /* Setup the audio service */
+    auto codec = board.GetAudioCodec();
+    audio_service_.Initialize(codec);
+    audio_service_.Start();
+
+    AudioServiceCallbacks callbacks;
+    callbacks.on_send_queue_available = [this]() {
+        xEventGroupSetBits(event_group_, MAIN_EVENT_SEND_AUDIO);
+    };
+    callbacks.on_wake_word_detected = [this](const std::string& wake_word) {
+        xEventGroupSetBits(event_group_, MAIN_EVENT_WAKE_WORD_DETECTED);
+    };
+    callbacks.on_vad_change = [this](bool speaking) {
+        xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
+    };
+    audio_service_.SetCallbacks(callbacks);
+
+    // Start the main event loop task with priority 3
+    xTaskCreate([](void* arg) {
+        ((Application*)arg)->MainEventLoop();
+        vTaskDelete(NULL);
+    }, "main_event_loop", 2048 * 4, this, 3, &main_event_loop_task_handle_);
+
+    /* Start the clock timer to update the status bar */
+    esp_timer_start_periodic(clock_timer_handle_, 1000000);
+
+    /* Wait for the network to be ready */
+    board.StartNetwork();
+
+    // Update the status bar immediately to show the network state
+    display->UpdateStatusBar(true);
+
+    // Check for new assets version
+    CheckAssetsVersion();
+
+    // Add MCP common tools before initializing the protocol
+    auto& mcp_server = McpServer::GetInstance();
+    mcp_server.AddCommonTools();
+    mcp_server.AddUserOnlyTools();
+
+    // 直接使用http_login获取token，绕过OTA
+    display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
+    
+    // 使用C风格回调，保持兼容性
+    http_login_start_task([](const char* token) {
+        // 在主线程中处理登录成功后的逻辑
+        std::string token_str(token);
+        Application::GetInstance().Schedule([token_str]() {
+            Application::GetInstance().OnLoginSuccess(token_str.c_str());
+        });
+    });
 }
 
 // Add a async task to MainLoop
