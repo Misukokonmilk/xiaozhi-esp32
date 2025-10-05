@@ -158,16 +158,8 @@ void McpServer::AddUserOnlyTools() {
             ESP_LOGI(TAG, "User requested firmware upgrade from URL: %s", url.c_str());
             
             auto& app = Application::GetInstance();
-            app.Schedule([url, &app]() {
-                auto ota = std::make_unique<Ota>();
-                
-                bool success = app.UpgradeFirmware(*ota, url);
-                if (!success) {
-                    ESP_LOGE(TAG, "Firmware upgrade failed");
-                }
-            });
-            
-            return true;
+            // 已移除OTA相关功能
+            return false;
         });
 
     // Display control

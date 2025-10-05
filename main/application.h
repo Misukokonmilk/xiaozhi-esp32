@@ -12,7 +12,7 @@
 #include <memory>
 
 #include "protocol.h"
-#include "ota.h"
+// #include "ota.h" // 已移除OTA功能
 #include "audio_service.h"
 #include "device_state_event.h"
 #include "protocols/http_login.h"
@@ -58,14 +58,20 @@ public:
     void StopListening();
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
-    bool UpgradeFirmware(Ota& ota, const std::string& url = "");
+    // bool UpgradeFirmware(Ota& ota, const std::string& url = ""); // 已移除OTA功能
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
     void SetAecMode(AecMode mode);
-    AecMode GetAecMode() const { return aec_mode_; }
+    // 公开播放提示音的方法，供显示模块等调用
     void PlaySound(const std::string_view& sound);
+    // 公开获取 AudioService 的方法，供外部模块使用
     AudioService& GetAudioService() { return audio_service_; }
 
+private:
+    // 标记收到 TTS stop，等待播放队列自然耗尽后再切换状态
+    bool speaking_end_pending_ = false;
+    AecMode GetAecMode() const { return aec_mode_; }
+    
     // 新增方法：处理登录成功后的逻辑
     void OnLoginSuccess(const char* token);
     
@@ -97,7 +103,6 @@ private:
     std::string websocket_server_url_ = WEBSOCKET_SERVER_URL; // 使用配置文件中的WebSocket服务器地址
 
     void OnWakeWordDetected();
-    void CheckNewVersion(Ota& ota);
     void CheckAssetsVersion();
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);

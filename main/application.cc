@@ -120,80 +120,6 @@ void Application::CheckAssetsVersion() {
     display->SetEmotion("microchip_ai");
 }
 
-void Application::CheckNewVersion(Ota& ota) {
-    const int MAX_RETRY = 10;
-    int retry_count = 0;
-    int retry_delay = 10; // 初始重试延迟为10秒
-
-    auto& board = Board::GetInstance();
-    while (true) {
-        SetDeviceState(kDeviceStateActivating);
-        auto display = board.GetDisplay();
-        display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);
-
-        if (!ota.CheckVersion()) {
-            retry_count++;
-            if (retry_count >= MAX_RETRY) {
-                ESP_LOGE(TAG, "Too many retries, exit version check");
-                return;
-            }
-
-            char buffer[256];
-            snprintf(buffer, sizeof(buffer), Lang::Strings::CHECK_NEW_VERSION_FAILED, retry_delay, ota.GetCheckVersionUrl().c_str());
-            Alert(Lang::Strings::ERROR, buffer, "cloud_slash", Lang::Sounds::OGG_EXCLAMATION);
-
-            ESP_LOGW(TAG, "Check new version failed, retry in %d seconds (%d/%d)", retry_delay, retry_count, MAX_RETRY);
-            for (int i = 0; i < retry_delay; i++) {
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                if (device_state_ == kDeviceStateIdle) {
-                    break;
-                }
-            }
-            retry_delay *= 2; // 每次重试后延迟时间翻倍
-            continue;
-        }
-        retry_count = 0;
-        retry_delay = 10; // 重置重试延迟时间
-
-        if (ota.HasNewVersion()) {
-            if (UpgradeFirmware(ota)) {
-                return; // This line will never be reached after reboot
-            }
-            // If upgrade failed, continue to normal operation (don't break, just fall through)
-        }
-
-        // No new version, mark the current version as valid
-        ota.MarkCurrentVersionValid();
-        if (!ota.HasActivationCode() && !ota.HasActivationChallenge()) {
-            xEventGroupSetBits(event_group_, MAIN_EVENT_CHECK_NEW_VERSION_DONE);
-            // Exit the loop if done checking new version
-            break;
-        }
-
-        display->SetStatus(Lang::Strings::ACTIVATION);
-        // Activation code is shown to the user and waiting for the user to input
-        if (ota.HasActivationCode()) {
-            ShowActivationCode(ota.GetActivationCode(), ota.GetActivationMessage());
-        }
-
-        // This will block the loop until the activation is done or timeout
-        for (int i = 0; i < 10; ++i) {
-            ESP_LOGI(TAG, "Activating... %d/%d", i + 1, 10);
-            esp_err_t err = ota.Activate();
-            if (err == ESP_OK) {
-                xEventGroupSetBits(event_group_, MAIN_EVENT_CHECK_NEW_VERSION_DONE);
-                break;
-            } else if (err == ESP_ERR_TIMEOUT) {
-                vTaskDelay(pdMS_TO_TICKS(3000));
-            } else {
-                vTaskDelay(pdMS_TO_TICKS(10000));
-            }
-            if (device_state_ == kDeviceStateIdle) {
-                break;
-            }
-        }
-    }
-}
 
 void Application::ShowActivationCode(const std::string& code, const std::string& message) {
     struct digit_sound {
@@ -367,8 +293,16 @@ void Application::OnLoginSuccess(const char* token) {
     });
     
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
+        // 移除每次接收音频包都打印的详细日志
         if (device_state_ == kDeviceStateSpeaking) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet));
+        } else {
+            // 只在设备状态不匹配时打印警告
+            static DeviceState last_warned_state = kDeviceStateUnknown;
+            if (device_state_ != last_warned_state) {
+                ESP_LOGW(TAG, "Device is not in speaking state (%s), dropping audio packets", STATE_STRINGS[device_state_]);
+                last_warned_state = device_state_;
+            }
         }
     });
     
@@ -395,6 +329,7 @@ void Application::OnLoginSuccess(const char* token) {
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
+                ESP_LOGI(TAG, "Received TTS start event");
                 Schedule([this]() {
                     aborted_ = false;
                     if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
@@ -402,14 +337,10 @@ void Application::OnLoginSuccess(const char* token) {
                     }
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
+                ESP_LOGI(TAG, "Received TTS stop event");
+                // 按用户语义：stop 表示不再有后续音频，但需播放队列自然结束
                 Schedule([this]() {
-                    if (device_state_ == kDeviceStateSpeaking) {
-                        if (listening_mode_ == kListeningModeManualStop) {
-                            SetDeviceState(kDeviceStateIdle);
-                        } else {
-                            SetDeviceState(kDeviceStateListening);
-                        }
-                    }
+                    speaking_end_pending_ = true;
                 });
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
                 auto text = cJSON_GetObjectItem(root, "text");
@@ -529,6 +460,9 @@ void Application::Start() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
     };
     audio_service_.SetCallbacks(callbacks);
+    
+    // 设置Protocol对象到AudioService，用于背压控制
+    audio_service_.SetProtocol(protocol_.get());
 
     // Start the main event loop task with priority 3
     xTaskCreate([](void* arg) {
@@ -624,7 +558,17 @@ void Application::MainEventLoop() {
             clock_ticks_++;
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
-        
+
+            // 若已收到 stop，等待播放队列耗尽后再切换为 listen/idle
+            if (speaking_end_pending_ && device_state_ == kDeviceStateSpeaking && audio_service_.IsIdle()) {
+                speaking_end_pending_ = false;
+                if (listening_mode_ == kListeningModeManualStop) {
+                    SetDeviceState(kDeviceStateIdle);
+                } else {
+                    SetDeviceState(kDeviceStateListening);
+                }
+            }
+
             // Print the debug info every 10 seconds
             if (clock_ticks_ % 10 == 0) {
                 // SystemInfo::PrintTaskCpuUsage(pdMS_TO_TICKS(1000));
@@ -761,58 +705,7 @@ void Application::Reboot() {
     esp_restart();
 }
 
-bool Application::UpgradeFirmware(Ota& ota, const std::string& url) {
-    auto& board = Board::GetInstance();
-    auto display = board.GetDisplay();
-    
-    // Use provided URL or get from OTA object
-    std::string upgrade_url = url.empty() ? ota.GetFirmwareUrl() : url;
-    std::string version_info = url.empty() ? ota.GetFirmwareVersion() : "(Manual upgrade)";
-    
-    // Close audio channel if it's open
-    if (protocol_ && protocol_->IsAudioChannelOpened()) {
-        ESP_LOGI(TAG, "Closing audio channel before firmware upgrade");
-        protocol_->CloseAudioChannel();
-    }
-    ESP_LOGI(TAG, "Starting firmware upgrade from URL: %s", upgrade_url.c_str());
-    
-    Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "download", Lang::Sounds::OGG_UPGRADE);
-    vTaskDelay(pdMS_TO_TICKS(3000));
-
-    SetDeviceState(kDeviceStateUpgrading);
-    
-    std::string message = std::string(Lang::Strings::NEW_VERSION) + version_info;
-    display->SetChatMessage("system", message.c_str());
-
-    board.SetPowerSaveMode(false);
-    audio_service_.Stop();
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    bool upgrade_success = ota.StartUpgradeFromUrl(upgrade_url, [display](int progress, size_t speed) {
-        std::thread([display, progress, speed]() {
-            char buffer[32];
-            snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
-            display->SetChatMessage("system", buffer);
-        }).detach();
-    });
-
-    if (!upgrade_success) {
-        // Upgrade failed, restart audio service and continue running
-        ESP_LOGE(TAG, "Firmware upgrade failed, restarting audio service and continuing operation...");
-        audio_service_.Start(); // Restart audio service
-        board.SetPowerSaveMode(true); // Restore power save mode
-        Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
-        vTaskDelay(pdMS_TO_TICKS(3000));
-        return false;
-    } else {
-        // Upgrade success, reboot immediately
-        ESP_LOGI(TAG, "Firmware upgrade successful, rebooting...");
-        display->SetChatMessage("system", "Upgrade successful, rebooting...");
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Brief pause to show message
-        Reboot();
-        return true;
-    }
-}
+// 已移除OTA相关功能
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
     if (device_state_ == kDeviceStateIdle) {

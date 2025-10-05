@@ -14,30 +14,13 @@
 #include <esp_hmac.h>
 #endif
 
-#include <cstring>
-#include <vector>
-#include <sstream>
-#include <algorithm>
+#include "ota.h"
+#include "system_info.h"
+#include "settings.h"
 
-#define TAG "Ota"
+// 整个文件内容全部移除
 
-
-Ota::Ota() {
-#ifdef ESP_EFUSE_BLOCK_USR_DATA
-    // Read Serial Number from efuse user_data
-    uint8_t serial_number[33] = {0};
-    if (esp_efuse_read_field_blob(ESP_EFUSE_USER_DATA, serial_number, 32 * 8) == ESP_OK) {
-        if (serial_number[0] == 0) {
-            has_serial_number_ = false;
-        } else {
-            serial_number_ = std::string(reinterpret_cast<char*>(serial_number), 32);
-            has_serial_number_ = true;
-        }
-    }
-#endif
-}
-
-Ota::~Ota() {
+// 已移除OTA功能
 }
 
 std::string Ota::GetCheckVersionUrl() {
@@ -160,26 +143,26 @@ bool Ota::CheckVersion() {
         ESP_LOGI(TAG, "No mqtt section found !");
     }
 
-    has_websocket_config_ = false;
-    cJSON *websocket = cJSON_GetObjectItem(root, "websocket");
-    if (cJSON_IsObject(websocket)) {
-        Settings settings("websocket", true);
-        cJSON *item = NULL;
-        cJSON_ArrayForEach(item, websocket) {
-            if (cJSON_IsString(item)) {
-                if (settings.GetString(item->string) != item->valuestring) {
-                    settings.SetString(item->string, item->valuestring);
-                }
-            } else if (cJSON_IsNumber(item)) {
-                if (settings.GetInt(item->string) != item->valueint) {
-                    settings.SetInt(item->string, item->valueint);
-                }
-            }
-        }
-        has_websocket_config_ = true;
-    } else {
-        ESP_LOGI(TAG, "No websocket section found!");
-    }
+    // has_websocket_config_ = false;
+    // cJSON *websocket = cJSON_GetObjectItem(root, "websocket");
+    // if (cJSON_IsObject(websocket)) {
+    //     Settings settings("websocket", true);
+    //     cJSON *item = NULL;
+    //     cJSON_ArrayForEach(item, websocket) {
+    //         if (cJSON_IsString(item)) {
+    //             if (settings.GetString(item->string) != item->valuestring) {
+    //                 settings.SetString(item->string, item->valuestring);
+    //             }
+    //         } else if (cJSON_IsNumber(item)) {
+    //             if (settings.GetInt(item->string) != item->valueint) {
+    //                 settings.SetInt(item->string, item->valueint);
+    //             }
+    //         }
+    //     }
+    //     has_websocket_config_ = true;
+    // } else {
+    //     ESP_LOGI(TAG, "No websocket section found!");
+    // }
 
     has_server_time_ = false;
     cJSON *server_time = cJSON_GetObjectItem(root, "server_time");

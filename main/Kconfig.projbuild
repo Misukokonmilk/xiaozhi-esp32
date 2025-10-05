@@ -1,8 +1,6 @@
 menu "Xiaozhi Assistant"
 
-config OTA_URL
-    string "Default OTA URL"
-    default "https://api.tenclass.net/xiaozhi/ota/"
+    # 已移除OTA相关配置
     help
         The application will access this URL to check for new firmwares and server address.
 
