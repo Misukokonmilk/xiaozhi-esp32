@@ -4,6 +4,11 @@
 
 #define TAG "Protocol"
 
+#ifdef DEBUG_MEMORY_TRACKING
+// Define the static member variable for AudioStreamPacket
+std::atomic<uint32_t> AudioStreamPacket::instance_count{0};
+#endif
+
 void Protocol::OnIncomingJson(std::function<void(const cJSON* root)> callback) {
     on_incoming_json_ = callback;
 }
@@ -75,6 +80,17 @@ void Protocol::SendStopListening() {
 
 void Protocol::SendMcpMessage(const std::string& payload) {
     std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
+    SendText(message);
+}
+
+void Protocol::SendBackpressureControl(bool enable_backpressure, int queue_size) {
+    std::string message = "{\"session_id\":\"" + session_id_ + 
+                         "\",\"type\":\"backpressure\",\"enable\":" + 
+                         (enable_backpressure ? "true" : "false");
+    if (queue_size > 0) {
+        message += ",\"queue_size\":" + std::to_string(queue_size);
+    }
+    message += "}";
     SendText(message);
 }
 

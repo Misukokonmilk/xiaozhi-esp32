@@ -83,15 +83,11 @@ void WebsocketProtocol::CloseAudioChannel() {
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
-    Settings settings("websocket", false);
-    std::string url = settings.GetString("url");
-    std::string token = settings.GetString("token");
-    int version = settings.GetInt("version");
-    if (version != 0) {
-        version_ = version;
-    }
-
-    return OpenAudioChannelWithToken(url, token, version_);
+    // 只使用本地宏定义的WebSocket服务器地址
+    std::string url = WEBSOCKET_SERVER_URL;
+    std::string token = "";
+    int version = WEBSOCKET_PROTOCOL_VERSION;
+    return OpenAudioChannelWithToken(url, token, version);
 }
 
 bool WebsocketProtocol::OpenAudioChannelWithToken(const std::string& url, const std::string& token, int version) {
@@ -120,32 +116,80 @@ bool WebsocketProtocol::OpenAudioChannelWithToken(const std::string& url, const 
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (binary) {
+            ESP_LOGI(TAG, "Received binary audio data, size: %d bytes", len);
             if (on_incoming_audio_ != nullptr) {
                 if (version_ == 2) {
-                    BinaryProtocol2* bp2 = (BinaryProtocol2*)data;
-                    bp2->version = ntohs(bp2->version);
-                    bp2->type = ntohs(bp2->type);
-                    bp2->timestamp = ntohl(bp2->timestamp);
-                    bp2->payload_size = ntohl(bp2->payload_size);
-                    auto payload = (uint8_t*)bp2->payload;
-                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
-                        .sample_rate = AUDIO_SAMPLE_RATE,
-                        .frame_duration = AUDIO_FRAME_DURATION_MS,
-                        .timestamp = bp2->timestamp,
-                        .payload = std::vector<uint8_t>(payload, payload + bp2->payload_size)
-                    }));
+                    // BinaryProtocol2: [u16 version][u16 type][u32 reserved][u32 timestamp][u32 payload_size][payload]
+                    // Use memcpy + ntoh* to avoid alignment and endianness issues
+                    if (len < sizeof(uint16_t) * 2 + sizeof(uint32_t) * 3) {
+                        ESP_LOGE(TAG, "Invalid v2 header size: %d", len);
+                        return;
+                    }
+                    size_t offset = 0;
+                    uint16_t version_be = 0, type_be = 0;
+                    uint32_t reserved_be = 0, timestamp_be = 0, payload_size_be = 0;
+                    memcpy(&version_be, data + offset, sizeof(version_be));
+                    offset += sizeof(version_be);
+                    memcpy(&type_be, data + offset, sizeof(type_be));
+                    offset += sizeof(type_be);
+                    memcpy(&reserved_be, data + offset, sizeof(reserved_be));
+                    offset += sizeof(reserved_be);
+                    memcpy(&timestamp_be, data + offset, sizeof(timestamp_be));
+                    offset += sizeof(timestamp_be);
+                    memcpy(&payload_size_be, data + offset, sizeof(payload_size_be));
+                    offset += sizeof(payload_size_be);
+
+                    uint32_t payload_size = ntohl(payload_size_be);
+                    uint32_t timestamp = ntohl(timestamp_be);
+                    if (payload_size == 0) {
+                        ESP_LOGW(TAG, "Empty v2 payload, drop");
+                        return;
+                    }
+                    if (len < offset + payload_size) {
+                        ESP_LOGE(TAG, "Truncated v2 packet: header=%d, len=%d, payload=%u", (int)offset, (int)len, payload_size);
+                        return;
+                    }
+
+                    const uint8_t* payload_start = reinterpret_cast<const uint8_t*>(data) + offset;
+                    auto packet = std::make_unique<AudioStreamPacket>();
+                    packet->sample_rate = AUDIO_SAMPLE_RATE;
+                    packet->frame_duration = AUDIO_FRAME_DURATION_MS;
+                    packet->timestamp = timestamp;
+                    packet->payload.assign(payload_start, payload_start + payload_size);
+                    on_incoming_audio_(std::move(packet));
                 } else if (version_ == 3) {
-                    BinaryProtocol3* bp3 = (BinaryProtocol3*)data;
-                    bp3->type = bp3->type;
-                    bp3->payload_size = ntohs(bp3->payload_size);
-                    auto payload = (uint8_t*)bp3->payload;
-                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
-                        .sample_rate = AUDIO_SAMPLE_RATE,
-                        .frame_duration = AUDIO_FRAME_DURATION_MS,
-                        .timestamp = 0,
-                        .payload = std::vector<uint8_t>(payload, payload + bp3->payload_size)
-                    }));
+                    // BinaryProtocol3: [u8 type][u8 reserved][u16 payload_size][payload]
+                    if (len < 4) {
+                        ESP_LOGE(TAG, "Invalid v3 header size: %d", len);
+                        return;
+                    }
+                    uint8_t type = 0, reserved = 0;
+                    uint16_t size_be = 0;
+                    size_t offset = 0;
+                    memcpy(&type, data + offset, sizeof(type));
+                    offset += sizeof(type);
+                    memcpy(&reserved, data + offset, sizeof(reserved));
+                    offset += sizeof(reserved);
+                    memcpy(&size_be, data + offset, sizeof(size_be));
+                    offset += sizeof(size_be);
+                    uint16_t payload_size = ntohs(size_be);
+                    if (payload_size == 0) {
+                        ESP_LOGW(TAG, "Empty v3 payload, drop");
+                        return;
+                    }
+                    if (len < offset + payload_size) {
+                        ESP_LOGE(TAG, "Truncated v3 packet: header=%d, len=%d, payload=%u", (int)offset, (int)len, payload_size);
+                        return;
+                    }
+                    const uint8_t* payload_start = reinterpret_cast<const uint8_t*>(data) + offset;
+                    auto packet = std::make_unique<AudioStreamPacket>();
+                    packet->sample_rate = AUDIO_SAMPLE_RATE;
+                    packet->frame_duration = AUDIO_FRAME_DURATION_MS;
+                    packet->timestamp = 0;
+                    packet->payload.assign(payload_start, payload_start + payload_size);
+                    on_incoming_audio_(std::move(packet));
                 } else {
+                    // 移除每次都打印的详细日志
                     on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
                         .sample_rate = AUDIO_SAMPLE_RATE,
                         .frame_duration = AUDIO_FRAME_DURATION_MS,
@@ -153,6 +197,8 @@ bool WebsocketProtocol::OpenAudioChannelWithToken(const std::string& url, const 
                         .payload = std::vector<uint8_t>((uint8_t*)data, (uint8_t*)data + len)
                     }));
                 }
+            } else {
+                ESP_LOGW(TAG, "Received audio data but no callback registered");
             }
         } else {
             // Parse JSON data

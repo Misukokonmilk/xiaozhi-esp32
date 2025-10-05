@@ -160,27 +160,30 @@ static void SetUIDisplayMode(const UIDisplayMode mode, EmoteDisplay* const displ
         return;
     }
 
-    gfx_obj_set_visible(g_obj_anim_listen, false);
-    gfx_obj_set_visible(g_obj_label_clock, false);
-    gfx_obj_set_visible(g_obj_label_toast, false);
+
+    if (g_obj_anim_listen) gfx_obj_set_visible(g_obj_anim_listen, false);
+    if (g_obj_label_clock) gfx_obj_set_visible(g_obj_label_clock, false);
+    if (g_obj_label_toast) gfx_obj_set_visible(g_obj_label_toast, false);
 
     // Show the selected control
     switch (mode) {
     case UIDisplayMode::SHOW_LISTENING: {
-        gfx_obj_set_visible(g_obj_anim_listen, true);
-        const AssetData emoji_data = display->GetIconData(ICON_LISTEN);
-        if (emoji_data.data) {
-            gfx_anim_set_src(g_obj_anim_listen, emoji_data.data, emoji_data.size);
-            gfx_anim_set_segment(g_obj_anim_listen, 0, 0xFFFF, 20, true);
-            gfx_anim_start(g_obj_anim_listen);
+        if (g_obj_anim_listen) {
+            gfx_obj_set_visible(g_obj_anim_listen, true);
+            const AssetData emoji_data = display->GetIconData(ICON_LISTEN);
+            if (emoji_data.data) {
+                gfx_anim_set_src(g_obj_anim_listen, emoji_data.data, emoji_data.size);
+                gfx_anim_set_segment(g_obj_anim_listen, 0, 0xFFFF, 20, true);
+                gfx_anim_start(g_obj_anim_listen);
+            }
         }
         break;
     }
     case UIDisplayMode::SHOW_TIME:
-        gfx_obj_set_visible(g_obj_label_clock, true);
+        if (g_obj_label_clock) gfx_obj_set_visible(g_obj_label_clock, true);
         break;
     case UIDisplayMode::SHOW_TIPS:
-        gfx_obj_set_visible(g_obj_label_toast, true);
+        if (g_obj_label_toast) gfx_obj_set_visible(g_obj_label_toast, true);
         break;
     }
 }
@@ -318,13 +321,13 @@ void EmoteEngine::SetEyes(const std::string &emoji_name, const bool repeat, cons
     }
 
     const AssetData emoji_data = display->GetEmojiData(emoji_name);
-    if (emoji_data.data) {
+    if (emoji_data.data && g_obj_anim_eye) {
         DisplayLockGuard lock(display);
         gfx_anim_set_src(g_obj_anim_eye, emoji_data.data, emoji_data.size);
         gfx_anim_set_segment(g_obj_anim_eye, 0, 0xFFFF, fps, repeat);
         gfx_anim_start(g_obj_anim_eye);
     } else {
-        ESP_LOGW(TAG, "SetEyes: No emoji data found for %s", emoji_name.c_str());
+        ESP_LOGW(TAG, "SetEyes: No emoji data found for %s or g_obj_anim_eye is nullptr", emoji_name.c_str());
     }
 }
 
@@ -501,9 +504,9 @@ void EmoteDisplay::SetPowerSaveMode(bool on)
     DisplayLockGuard lock(this);
     ESP_LOGI(TAG, "SetPowerSaveMode: %s", on ? "ON" : "OFF");
     if (on) {
-        gfx_anim_stop(g_obj_anim_eye);
+        if (g_obj_anim_eye) gfx_anim_stop(g_obj_anim_eye);
     } else {
-        gfx_anim_start(g_obj_anim_eye);
+        if (g_obj_anim_eye) gfx_anim_start(g_obj_anim_eye);
     }
 }
 

@@ -6,12 +6,58 @@
 #include <functional>
 #include <chrono>
 #include <vector>
+#include <atomic>
+
+#ifdef DEBUG_MEMORY_TRACKING
+#include <esp_log.h>
+#endif
 
 struct AudioStreamPacket {
     int sample_rate = 0;
     int frame_duration = 0;
     uint32_t timestamp = 0;
     std::vector<uint8_t> payload;
+    
+#ifdef DEBUG_MEMORY_TRACKING
+    static std::atomic<uint32_t> instance_count;
+    uint32_t instance_id;
+    
+    AudioStreamPacket() {
+        instance_id = instance_count.fetch_add(1);
+        ESP_LOGV("AudioStreamPacket", "Created packet %u (total: %u)", instance_id, instance_count.load());
+    }
+    
+    ~AudioStreamPacket() {
+        ESP_LOGV("AudioStreamPacket", "Destroying packet %u (remaining: %u)", instance_id, instance_count.load() - 1);
+        instance_count.fetch_sub(1);
+    }
+    
+    // 禁用拷贝构造和拷贝赋值，强制使用移动语义
+    AudioStreamPacket(const AudioStreamPacket&) = delete;
+    AudioStreamPacket& operator=(const AudioStreamPacket&) = delete;
+    
+    // 允许移动构造和移动赋值
+    AudioStreamPacket(AudioStreamPacket&& other) noexcept 
+        : sample_rate(other.sample_rate)
+        , frame_duration(other.frame_duration)
+        , timestamp(other.timestamp)
+        , payload(std::move(other.payload))
+        , instance_id(other.instance_id) {
+        ESP_LOGV("AudioStreamPacket", "Moved packet %u", instance_id);
+    }
+    
+    AudioStreamPacket& operator=(AudioStreamPacket&& other) noexcept {
+        if (this != &other) {
+            sample_rate = other.sample_rate;
+            frame_duration = other.frame_duration;
+            timestamp = other.timestamp;
+            payload = std::move(other.payload);
+            instance_id = other.instance_id;
+            ESP_LOGV("AudioStreamPacket", "Move-assigned packet %u", instance_id);
+        }
+        return *this;
+    }
+#endif
 };
 
 struct BinaryProtocol2 {
@@ -73,6 +119,7 @@ public:
     virtual void SendStopListening();
     virtual void SendAbortSpeaking(AbortReason reason);
     virtual void SendMcpMessage(const std::string& message);
+    virtual void SendBackpressureControl(bool enable_backpressure, int queue_size = 0);
 
 protected:
     std::function<void(const cJSON* root)> on_incoming_json_;
@@ -83,7 +130,7 @@ protected:
     std::function<void()> on_connected_;
     std::function<void()> on_disconnected_;
 
-    int server_sample_rate_ = 24000;
+    int server_sample_rate_ = 16000;
     int server_frame_duration_ = 60;
     bool error_occurred_ = false;
     std::string session_id_;

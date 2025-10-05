@@ -37,11 +37,15 @@
 
 #define OPUS_FRAME_DURATION_MS 60
 #define MAX_ENCODE_TASKS_IN_QUEUE 2
-#define MAX_PLAYBACK_TASKS_IN_QUEUE 2
-#define MAX_DECODE_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
+#define MAX_PLAYBACK_TASKS_IN_QUEUE 8
+#define MAX_DECODE_TASKS_IN_QUEUE (6000 / OPUS_FRAME_DURATION_MS)  // 更明确的命名
 #define MAX_SEND_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
 #define AUDIO_TESTING_MAX_DURATION_MS 10000
 #define MAX_TIMESTAMPS_IN_QUEUE 3
+
+// 预分配缓冲区大小，避免频繁的内存分配
+#define PCM_BUFFER_SIZE 1024
+#define OPUS_BUFFER_SIZE 1024
 
 #define AUDIO_POWER_TIMEOUT_MS 15000
 #define AUDIO_POWER_CHECK_INTERVAL_MS 1000
@@ -102,6 +106,7 @@ public:
     void EnableDeviceAec(bool enable);
 
     void SetCallbacks(AudioServiceCallbacks& callbacks);
+    void SetProtocol(Protocol* protocol);
 
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
     std::unique_ptr<AudioStreamPacket> PopPacketFromSendQueue();
@@ -112,6 +117,7 @@ public:
 
 private:
     AudioCodec* codec_ = nullptr;
+    Protocol* protocol_ = nullptr;  // 添加协议对象指针
     AudioServiceCallbacks callbacks_;
     std::unique_ptr<AudioProcessor> audio_processor_;
     std::unique_ptr<WakeWord> wake_word_;
@@ -130,6 +136,7 @@ private:
     TaskHandle_t audio_input_task_handle_ = nullptr;
     TaskHandle_t audio_output_task_handle_ = nullptr;
     TaskHandle_t opus_codec_task_handle_ = nullptr;
+    TaskHandle_t opus_decode_task_handle_ = nullptr;  // 专用解码任务
     std::mutex audio_queue_mutex_;
     std::condition_variable audio_queue_cv_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_decode_queue_;
@@ -153,6 +160,7 @@ private:
     void AudioInputTask();
     void AudioOutputTask();
     void OpusCodecTask();
+    void OpusDecodeTask();  // 专用解码任务
     void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckAndUpdateAudioPowerState();
