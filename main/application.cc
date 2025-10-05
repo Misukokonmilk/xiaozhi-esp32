@@ -281,6 +281,8 @@ void Application::OnLoginSuccess(const char* token) {
     
     // 初始化WebSocket协议
     protocol_ = std::make_unique<WebsocketProtocol>();
+    // 创建协议后立刻设置到 AudioService，避免空指针导致后续协调缺失
+    audio_service_.SetProtocol(protocol_.get());
     
     // 设置协议回调
     protocol_->OnConnected([this]() {
@@ -423,6 +425,7 @@ void Application::OnLoginSuccess(const char* token) {
                 display->SetChatMessage("system", "WebSocket连接成功");
                 // Play the success sound to indicate the device is ready
                 audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+                // 保持原始行为：不在连接成功后自动进入监听，等待用户或逻辑触发
             } else {
                 ESP_LOGE(TAG, "Failed to open WebSocket audio channel");
                 Alert(Lang::Strings::ERROR, "WebSocket连接失败", "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
@@ -529,6 +532,7 @@ void Application::MainEventLoop() {
         if (bits & MAIN_EVENT_SEND_AUDIO) {
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
                 if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
+                    ESP_LOGE(TAG, "SendAudio failed, breaking send loop");
                     break;
                 }
             }
@@ -663,14 +667,12 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
-
-            // Make sure the audio processor is running
-            if (!audio_service_.IsAudioProcessorRunning()) {
-                // Send the start listening command
-                protocol_->SendStartListening(listening_mode_);
-                audio_service_.EnableVoiceProcessing(true);
-                audio_service_.EnableWakeWordDetection(false);
-            }
+            // 恢复原始行为：进入监听态无条件告知服务器并开启语音处理
+            ESP_LOGI(TAG, "Sending listen/start (mode=%d)", (int)listening_mode_);
+            protocol_->SendStartListening(listening_mode_);
+            ESP_LOGI(TAG, "Enable voice processing for listening state");
+            audio_service_.EnableVoiceProcessing(true);
+            audio_service_.EnableWakeWordDetection(false);
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
@@ -684,6 +686,7 @@ void Application::SetDeviceState(DeviceState state) {
                 audio_service_.EnableWakeWordDetection(false);
 #endif
             }
+            // 恢复原始行为：进入说话态即初始化解码器
             audio_service_.ResetDecoder();
             break;
         default:

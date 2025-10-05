@@ -261,7 +261,7 @@ static void SetupUI(const gfx_handle_t engine_handle, EmoteDisplay* const displa
 
     g_obj_anim_listen = gfx_anim_create(engine_handle);
     gfx_obj_align(g_obj_anim_listen, GFX_ALIGN_TOP_MID, 0, 5);
-    gfx_anim_start(g_obj_anim_listen);
+    // 不在未设置动画源时启动，避免空文件描述符错误
     gfx_obj_set_visible(g_obj_anim_listen, false);
 
     g_obj_img_status = gfx_img_create(engine_handle);
@@ -506,7 +506,7 @@ void EmoteDisplay::SetPowerSaveMode(bool on)
     if (on) {
         if (g_obj_anim_eye) gfx_anim_stop(g_obj_anim_eye);
     } else {
-        if (g_obj_anim_eye) gfx_anim_start(g_obj_anim_eye);
+        // 避免在未设置动画源时强制启动，等待后续 SetEyes 设置并启动
     }
 }
 

@@ -17,6 +17,9 @@
 
 #define TAG "AudioService"
 
+// Sanity limit to guard against malformed packets causing huge allocations
+static constexpr size_t MAX_OPUS_PAYLOAD_SIZE = 4096;  // typical Opus packet << 1275 bytes; 4KB is safe headroom
+
 
 AudioService::AudioService() {
     event_group_ = xEventGroupCreate();
@@ -197,10 +200,17 @@ void AudioService::OpusDecodeTask() {
         int frame_duration = packet->frame_duration;
         uint32_t timestamp = packet->timestamp;
         
+        // 载荷健壮性校验，避免异常巨大包触发 length_error/内存碎片化
+        const size_t payload_size = packet->payload.size();
+        if (payload_size == 0 || payload_size > MAX_OPUS_PAYLOAD_SIZE) {
+            ESP_LOGE(TAG, "Invalid opus payload size: %u, dropping (sr=%d, ts=%u)", (unsigned)payload_size, sample_rate, timestamp);
+            continue;
+        }
+
         // 创建payload的拷贝而不是移动，避免移动后的析构问题
         std::vector<uint8_t> payload_copy;
-        payload_copy.reserve(packet->payload.size());
-        payload_copy.assign(packet->payload.begin(), packet->payload.end());
+        payload_copy.resize(payload_size);
+        memcpy(payload_copy.data(), packet->payload.data(), payload_size);
         
         ESP_LOGV(TAG, "Processing packet: payload_size=%d, sample_rate=%d, timestamp=%u", 
                  payload_copy.size(), sample_rate, timestamp);
@@ -468,7 +478,7 @@ void AudioService::OpusCodecTask() {
         // 每5秒打印一次性能统计
         uint32_t current_time = esp_log_timestamp();
         if (current_time - last_performance_log_time > 5000) {
-            ESP_LOGI(TAG, "Encoding performance: %d packets in last 5s. Queue sizes: encode=%d, send=%d",
+            ESP_LOGD(TAG, "Encoding performance: %d packets in last 5s. Queue sizes: encode=%d, send=%d",
                      encode_count_since_last_log,
                      audio_encode_queue_.size(), audio_send_queue_.size());
             last_performance_log_time = current_time;
@@ -648,7 +658,7 @@ void AudioService::EnableWakeWordDetection(bool enable) {
 }
 
 void AudioService::EnableVoiceProcessing(bool enable) {
-    ESP_LOGD(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
+    ESP_LOGI(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
     if (enable) {
         if (!audio_processor_initialized_) {
             audio_processor_->Initialize(codec_, OPUS_FRAME_DURATION_MS, models_list_);
@@ -658,9 +668,11 @@ void AudioService::EnableVoiceProcessing(bool enable) {
         /* We should make sure no audio is playing */
         ResetDecoder();
         audio_input_need_warmup_ = true;
+        ESP_LOGI(TAG, "Starting audio processor, feed_size=%d", audio_processor_->GetFeedSize());
         audio_processor_->Start();
         xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
     } else {
+        ESP_LOGI(TAG, "Stopping audio processor");
         audio_processor_->Stop();
         xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
     }
@@ -787,9 +799,14 @@ void AudioService::PlaySound(const std::string_view& ogg) {
             auto packet = std::make_unique<AudioStreamPacket>();
             packet->sample_rate = sample_rate;
             packet->frame_duration = 60;
-            packet->payload.resize(pkt_len);
-            std::memcpy(packet->payload.data(), pkt_ptr, pkt_len);
-            PushPacketToDecodeQueue(std::move(packet), true);
+            // 健壮性：限制每个Opus包大小，防止异常 OGG 造成巨大包
+            if (pkt_len == 0 || pkt_len > MAX_OPUS_PAYLOAD_SIZE) {
+                ESP_LOGE(TAG, "OGG packet length out of range: %u, skip", (unsigned)pkt_len);
+            } else {
+                packet->payload.resize(pkt_len);
+                std::memcpy(packet->payload.data(), pkt_ptr, pkt_len);
+                PushPacketToDecodeQueue(std::move(packet), true);
+            }
         }
 
         offset = body_off + body_size;

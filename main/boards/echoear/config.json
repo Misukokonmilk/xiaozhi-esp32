@@ -7,8 +7,13 @@
                  "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/16m.csv\"",
                  "CONFIG_USE_EMOTE_MESSAGE_STYLE=y",
                  "CONFIG_BOARD_TYPE_ECHOEAR=y",
-                 "CONFIG_FLASH_CUSTOM_ASSETS=y",
-                 "CONFIG_CUSTOM_ASSETS_FILE=\"https://dl.espressif.com/AE/wn9_nihaoxiaozhi_tts-font_puhui_common_20_4-echoear.bin\""
+                 "CONFIG_FLASH_DEFAULT_ASSETS=y",
+                 "CONFIG_USE_AFE_WAKE_WORD=n",
+                 "CONFIG_USE_CUSTOM_WAKE_WORD=y",
+                 "CONFIG_CUSTOM_WAKE_WORD=\"ni hao ling yi\"",
+                 "CONFIG_CUSTOM_WAKE_WORD_DISPLAY=\"你好零一\"",
+                 "CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=10",
+                 "CONFIG_SR_MN_CN_MULTINET7_QUANT=y"
              ]
         }
     ]

@@ -33,6 +33,7 @@ bool WebsocketProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
         return false;
     }
 
+    ESP_LOGD(TAG, "SendAudio: version=%d, payload=%u bytes", (int)version_, (unsigned)packet->payload.size());
     if (version_ == 2) {
         std::string serialized;
         serialized.resize(sizeof(BinaryProtocol2) + packet->payload.size());
