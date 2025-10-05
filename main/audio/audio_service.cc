@@ -162,7 +162,8 @@ void AudioService::OpusDecodeTask() {
             
             // 如果解码队列过长，记录日志但继续处理
             if (audio_decode_queue_.size() > MAX_DECODE_TASKS_IN_QUEUE * 0.8) {
-                ESP_LOGW(TAG, "Decode queue is getting full: %d packets", audio_decode_queue_.size());
+                // 降低日志级别，避免频繁告警污染输出
+                ESP_LOGD(TAG, "Decode queue is getting full: %d packets", audio_decode_queue_.size());
             }
             
             if (audio_playback_queue_.size() >= MAX_PLAYBACK_TASKS_IN_QUEUE) {
@@ -570,7 +571,8 @@ bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> pa
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
     
     if (audio_decode_queue_.size() >= MAX_DECODE_TASKS_IN_QUEUE) {
-        ESP_LOGW(TAG, "Decode queue is full (%d packets), wait=%s", audio_decode_queue_.size(), wait ? "true" : "false");
+        // 将队列满的告警降为调试级别，减少运行时噪音
+        ESP_LOGD(TAG, "Decode queue is full (%d packets), wait=%s", audio_decode_queue_.size(), wait ? "true" : "false");
         if (wait) {
             // 等待队列有空间
             audio_queue_cv_.wait(lock, [this]() { return audio_decode_queue_.size() < MAX_DECODE_TASKS_IN_QUEUE || service_stopped_; });
@@ -580,16 +582,16 @@ bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> pa
             }
         } else {
             // 队列满时，暂时阻塞而不是丢包，给解码任务更多时间处理
-            ESP_LOGW(TAG, "Decode queue full, waiting briefly for space...");
+            ESP_LOGD(TAG, "Decode queue full, waiting briefly for space...");
             auto timeout = std::chrono::milliseconds(10); // 短暂等待10ms
             if (audio_queue_cv_.wait_for(lock, timeout, [this]() { return audio_decode_queue_.size() < MAX_DECODE_TASKS_IN_QUEUE || service_stopped_; })) {
                 if (service_stopped_) {
                     ESP_LOGW(TAG, "Service stopped during timeout, dropping packet");
                     return false;
                 }
-                ESP_LOGI(TAG, "Queue space available after brief wait");
+                ESP_LOGD(TAG, "Queue space available after brief wait");
             } else {
-                ESP_LOGW(TAG, "Queue still full after timeout, packet may be delayed");
+                ESP_LOGD(TAG, "Queue still full after timeout, packet may be delayed");
                 // 即使超时也要添加包，让系统自然处理
             }
         }

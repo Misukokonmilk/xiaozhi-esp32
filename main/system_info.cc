@@ -147,5 +147,6 @@ void SystemInfo::PrintTaskList() {
 void SystemInfo::PrintHeapStats() {
     int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     int min_free_sram = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-    ESP_LOGI(TAG, "free sram: %u minimal sram: %u", free_sram, min_free_sram);
+    // 降低日志级别以减少终端噪音；需要时改为 INFO 重新开启
+    ESP_LOGD(TAG, "free sram: %u minimal sram: %u", free_sram, min_free_sram);
 }
