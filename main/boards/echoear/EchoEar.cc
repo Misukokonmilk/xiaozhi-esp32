@@ -26,6 +26,8 @@
 
 #define TAG "EchoEar"
 
+#define USE_LVGL_DEFAULT    0
+
 
 temperature_sensor_handle_t temp_sensor = NULL;
 static const st77916_lcd_init_cmd_t vendor_specific_init_yysj[] = {

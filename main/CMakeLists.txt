@@ -62,6 +62,10 @@ endfunction()
 set(BUILTIN_TEXT_FONT font_puhui_14_1)
 set(BUILTIN_ICON_FONT font_awesome_14_1)
 
+# Default board selection: echoear
+# Ensures a valid BOARD_TYPE even before Kconfig variables are evaluated
+set(BOARD_TYPE "echoear")
+
 # Add board files according to BOARD_TYPE
 # Set default assets if the board uses partition table V2
 if(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI)
@@ -496,6 +500,9 @@ elseif(CONFIG_BOARD_TYPE_YUNLIAO_S3)
     set(DEFAULT_EMOJI_COLLECTION twemoji_64)
 endif()
 
+if(NOT BOARD_TYPE STREQUAL "echoear")
+    message(FATAL_ERROR "Only echoear board is supported in this project")
+endif()
 file(GLOB BOARD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.c
@@ -690,15 +697,36 @@ function(build_default_assets_bin)
     list(APPEND BUILD_ARGS "--xiaozhi_fonts_path" "${XIAOZHI_FONTS_PATH}")
     
     # Create custom command to build assets
-    add_custom_command(
-        OUTPUT ${GENERATED_ASSETS_BIN}
-        COMMAND python ${PROJECT_DIR}/scripts/build_default_assets.py ${BUILD_ARGS}
-        DEPENDS
-            ${SDKCONFIG}
-            ${PROJECT_DIR}/scripts/build_default_assets.py
-        COMMENT "Building default assets.bin based on configuration"
-        VERBATIM
-    )
+    # Allow BOARD_RES_PATH from environment if not explicitly set
+    if(NOT BOARD_RES_PATH AND DEFINED ENV{BOARD_RES_PATH})
+        set(BOARD_RES_PATH $ENV{BOARD_RES_PATH})
+    endif()
+
+    # If using Emote style on echoear and BOARD_RES_PATH is provided, build via spiffs_assets (includes EAF)
+    if(CONFIG_USE_EMOTE_MESSAGE_STYLE AND BOARD_TYPE STREQUAL "echoear" AND BOARD_RES_PATH)
+        add_custom_command(
+            OUTPUT ${GENERATED_ASSETS_BIN}
+            COMMAND python ${PROJECT_DIR}/scripts/spiffs_assets/build.py --target_board ${PROJECT_DIR}/main/boards/echoear --res_path ${BOARD_RES_PATH}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJECT_DIR}/scripts/spiffs_assets/build/output/assets.bin" "${GENERATED_ASSETS_BIN}"
+            DEPENDS
+                ${SDKCONFIG}
+                ${PROJECT_DIR}/scripts/spiffs_assets/build.py
+                ${PROJECT_DIR}/main/boards/echoear/emote.json
+                ${PROJECT_DIR}/main/boards/echoear/layout.json
+            COMMENT "Building echoear dynamic assets.bin (EAF animations)"
+            VERBATIM
+        )
+    else()
+        add_custom_command(
+            OUTPUT ${GENERATED_ASSETS_BIN}
+            COMMAND python ${PROJECT_DIR}/scripts/build_default_assets.py ${BUILD_ARGS}
+            DEPENDS
+                ${SDKCONFIG}
+                ${PROJECT_DIR}/scripts/build_default_assets.py
+            COMMENT "Building default assets.bin based on configuration"
+            VERBATIM
+        )
+    endif()
     
     # Create target for generated assets
     add_custom_target(generated_default_assets ALL

@@ -16,6 +16,8 @@
 #include <driver/gpio.h>
 #include <arpa/inet.h>
 #include <font_awesome.h>
+#include <time.h>
+#include <lwip/apps/sntp.h>
 
 #define TAG "Application"
 
@@ -437,6 +439,23 @@ void Application::OnLoginSuccess(const char* token) {
     }
 }
 
+static void InitSntpOnce() {
+    static bool sntp_started = false;
+    if (sntp_started) return;
+
+    // 设置时区为中国标准时间（UTC+8），若需其他时区可在设置中调整
+    setenv("TZ", "CST-8", 1);
+    tzset();
+
+    // 配置与启动 SNTP
+    sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    sntp_setservername(0, "ntp.aliyun.com");
+    sntp_init();
+    ESP_LOGI(TAG, "SNTP initialized (server: ntp.aliyun.com)");
+
+    sntp_started = true;
+}
+
 void Application::Start() {
     auto& board = Board::GetInstance();
     SetDeviceState(kDeviceStateStarting);
@@ -478,6 +497,9 @@ void Application::Start() {
 
     /* Wait for the network to be ready */
     board.StartNetwork();
+
+    // 启动 SNTP 时间同步（一次性）
+    InitSntpOnce();
 
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
