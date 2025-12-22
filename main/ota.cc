@@ -2,9 +2,13 @@
 #include "system_info.h"
 #include "settings.h"
 #include "assets/lang_config.h"
+#include "protocols/config.h"
 
 #include <cJSON.h>
 #include <esp_log.h>
+#include <esp_timer.h>
+#include <sys/time.h>
+#include <sstream>
 #include <esp_partition.h>
 #include <esp_ota_ops.h>
 #include <esp_app_format.h>
@@ -14,20 +18,16 @@
 #include <esp_hmac.h>
 #endif
 
-#include "ota.h"
-#include "system_info.h"
-#include "settings.h"
+static const char* TAG = "OTA";
 
-// 整个文件内容全部移除
-
-// 已移除OTA功能
-}
+Ota::Ota() {}
+Ota::~Ota() {}
 
 std::string Ota::GetCheckVersionUrl() {
     Settings settings("wifi", false);
     std::string url = settings.GetString("ota_url");
     if (url.empty()) {
-        url = CONFIG_OTA_URL;
+        url = std::string(HTTP_SCHEME "://") + HTTP_LOGIN_SERVER_HOST + ":" + std::to_string(HTTP_LOGIN_SERVER_PORT) + OTA_CHECK_ENDPOINT;
     }
     return url;
 }
@@ -40,6 +40,8 @@ std::unique_ptr<Http> Ota::SetupHttp() {
     http->SetHeader("Activation-Version", has_serial_number_ ? "2" : "1");
     http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
     http->SetHeader("Client-Id", board.GetUuid());
+    http->SetHeader("Client-Platform", CLIENT_PLATFORM);
+    http->SetHeader("Device-Type", DEVICE_TYPE);
     if (has_serial_number_) {
         http->SetHeader("Serial-Number", serial_number_.c_str());
         ESP_LOGI(TAG, "Setup HTTP, User-Agent: %s, Serial-Number: %s", user_agent.c_str(), serial_number_.c_str());
@@ -354,10 +356,7 @@ bool Ota::StartUpgrade(std::function<void(int progress, size_t speed)> callback)
     return Upgrade(firmware_url_);
 }
 
-bool Ota::StartUpgradeFromUrl(const std::string& url, std::function<void(int progress, size_t speed)> callback) {
-    upgrade_callback_ = callback;
-    return Upgrade(url);
-}
+// Removed unused StartUpgradeFromUrl
 
 std::vector<int> Ota::ParseVersion(const std::string& version) {
     std::vector<int> versionNumbers;

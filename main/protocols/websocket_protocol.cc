@@ -103,6 +103,7 @@ bool WebsocketProtocol::OpenAudioChannelWithToken(const std::string& url, const 
         return false;
     }
 
+    // 构造持久字符串，避免传递临时对象的 c_str() 导致潜在悬空指针问题
     if (!token.empty()) {
         // If token not has a space, add "Bearer " prefix
         std::string token_copy = token; // 创建可修改的副本
@@ -111,13 +112,26 @@ bool WebsocketProtocol::OpenAudioChannelWithToken(const std::string& url, const 
         }
         websocket_->SetHeader("Authorization", token_copy.c_str());
     }
-    websocket_->SetHeader("Protocol-Version", std::to_string(version_).c_str());
-    websocket_->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
-    websocket_->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
+    std::string protocol_version_str = std::to_string(version_);
+    std::string device_id_str = SystemInfo::GetMacAddress();
+    std::string client_id_str = Board::GetInstance().GetUuid();
+    websocket_->SetHeader("Protocol-Version", protocol_version_str.c_str());
+    websocket_->SetHeader("Device-Id", device_id_str.c_str());
+    websocket_->SetHeader("Client-Id", client_id_str.c_str());
+    websocket_->SetHeader("Client-Platform", CLIENT_PLATFORM);
+    websocket_->SetHeader("Device-Type", DEVICE_TYPE);
+
+    // 连接前打印诊断信息，便于定位握手问题
+    ESP_LOGI(TAG, "WS diagnostics: url=%s, has_token=%s, token_len=%d, device_id=%s, client_id=%s",
+        url.c_str(),
+        token.empty() ? "false" : "true",
+        (int)token.size(),
+        SystemInfo::GetMacAddress().c_str(),
+        Board::GetInstance().GetUuid().c_str());
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (binary) {
-            ESP_LOGI(TAG, "Received binary audio data, size: %d bytes", len);
+            // ESP_LOGI(TAG, "Received binary audio data, size: %d bytes", len);
             if (on_incoming_audio_ != nullptr) {
                 if (version_ == 2) {
                     // BinaryProtocol2: [u16 version][u16 type][u32 reserved][u32 timestamp][u32 payload_size][payload]

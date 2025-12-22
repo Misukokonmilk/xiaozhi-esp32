@@ -9,21 +9,27 @@ extern "C" {
 // 配置HTTP登录服务器的地址、端口、登录接口路径以及登录凭据
 // #define HTTP_LOGIN_SERVER_HOST "47.109.29.58"           // HTTP登录服务器主机地址
 // #define HTTP_LOGIN_SERVER_PORT 17777                    // HTTP登录服务器端口
-#define HTTP_LOGIN_SERVER_HOST "47.109.195.63"           // HTTP登录服务器主机地址
-#define HTTP_LOGIN_SERVER_PORT 17777                    // HTTP登录服务器端口
+#define HTTP_LOGIN_SERVER_HOST "47.109.195.63"
+#define HTTP_LOGIN_SERVER_PORT 17777
 // #define HTTP_LOGIN_SERVER_HOST "192.168.31.120"           // HTTP登录服务器主机地址
 // #define HTTP_LOGIN_SERVER_PORT 8000                    // HTTP登录服务器端口
 #define HTTP_LOGIN_ENDPOINT "/login"                    // 登录接口路径
-#define HTTP_LOGIN_USERNAME "sf7"                       // 登录用户名
+#define HTTP_LOGIN_USERNAME "sf11"                       // 登录用户名
 #define HTTP_LOGIN_PASSWORD "123456"                    // 登录密码
 #define HTTP_LOGIN_TOKEN_JSON_FIELD "token"             // 服务器返回的token字段名
+// 刷新接口路径（用于通过旧token获取新token）
+#ifndef HTTP_REFRESH_ENDPOINT
+#define HTTP_REFRESH_ENDPOINT "/auth/refresh"
+#endif
 
 // WebSocket Server Configuration
 // 配置WebSocket服务器地址和协议版本
-#define WEBSOCKET_SERVER_URL "ws://47.109.195.63:17777/ws" // WebSocket服务器地址
-#define WEBSOCKET_PROTOCOL_VERSION 1                     // WebSocket协议版本
-// #define WEBSOCKET_SERVER_URL "ws://192.168.31.120:8000/ws" // WebSocket服务器地址
-// #define WEBSOCKET_PROTOCOL_VERSION 1                     // WebSocket协议版本
+#define WEBSOCKET_PROTOCOL_VERSION 1
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+#define HTTP_SCHEME "http"
+#define WS_SCHEME "ws"
+#define WEBSOCKET_SERVER_URL WS_SCHEME "://" HTTP_LOGIN_SERVER_HOST ":" TOSTRING(HTTP_LOGIN_SERVER_PORT) "/ws"
 
 // HTTP Login Retry Configuration
 // 配置HTTP登录重试次数和重试间隔
@@ -35,6 +41,10 @@ extern "C" {
 #define WEBSOCKET_CONNECTION_TIMEOUT_MS 10000           // WebSocket连接超时时间（毫秒）
 #define WEBSOCKET_PING_INTERVAL_SECONDS 30              // WebSocket心跳间隔（秒）
 
+// Platform & Device Type
+#define CLIENT_PLATFORM "xiaozhi-esp32"
+#define DEVICE_TYPE "miaoban"
+
 // Audio Configuration
 // 配置音频参数
 #define AUDIO_FORMAT "opus"                             // 音频编码格式
@@ -44,7 +54,11 @@ extern "C" {
 
 // HTTP Client Configuration
 // 配置HTTP客户端参数
-#define HTTP_CLIENT_TIMEOUT_MS 10000                    // HTTP客户端超时时间（毫秒）
+#define HTTP_CLIENT_TIMEOUT_MS 10000
+
+// OTA Check Endpoint
+// 与 HTTP/WS 同一服务器，仅协议与路径不同
+#define OTA_CHECK_ENDPOINT "/ota/"
 
 #ifdef __cplusplus
 }

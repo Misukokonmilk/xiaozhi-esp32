@@ -121,6 +121,8 @@ void HttpLogin::LoginTask() {
         
         esp_http_client_handle_t client = esp_http_client_init(&config);
         esp_http_client_set_header(client, "Content-Type", "application/json");
+        esp_http_client_set_header(client, "Client-Platform", CLIENT_PLATFORM);
+        esp_http_client_set_header(client, "Device-Type", DEVICE_TYPE);
         esp_http_client_set_post_field(client, post_data, strlen(post_data));
         
         esp_err_t err = esp_http_client_perform(client);

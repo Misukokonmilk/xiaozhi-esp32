@@ -12,7 +12,7 @@
 #include <memory>
 
 #include "protocol.h"
-// #include "ota.h" // 已移除OTA功能
+#include "ota.h"
 #include "audio_service.h"
 #include "device_state_event.h"
 #include "protocols/http_login.h"
@@ -58,7 +58,7 @@ public:
     void StopListening();
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
-    // bool UpgradeFirmware(Ota& ota, const std::string& url = ""); // 已移除OTA功能
+    void CheckNewVersion(Ota& ota);
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
     void SetAecMode(AecMode mode);
@@ -99,8 +99,15 @@ private:
     TaskHandle_t check_new_version_task_handle_ = nullptr;
     TaskHandle_t main_event_loop_task_handle_ = nullptr;
 
+    // 在Wi‑Fi断开时延迟WebSocket重连，等待链路恢复
+    bool ws_reconnect_waiting_wifi_ = false;
+    int ws_reconnect_next_tick_ = 0; // 下一次尝试重连的tick时间戳
+
     // 新增成员变量：WebSocket服务器地址
     std::string websocket_server_url_ = WEBSOCKET_SERVER_URL; // 使用配置文件中的WebSocket服务器地址
+
+    // 标记是否为用户主动关闭音频通道，避免误触发刷新与自动重连
+    bool closing_by_user_ = false;
 
     void OnWakeWordDetected();
     void CheckAssetsVersion();

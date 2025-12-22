@@ -9,6 +9,9 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "protocols/http_refresh.h"
+#include "protocols/http_login.h"
+#include "ota.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -18,6 +21,7 @@
 #include <font_awesome.h>
 #include <time.h>
 #include <lwip/apps/sntp.h>
+#include <wifi_station.h>
 
 #define TAG "Application"
 
@@ -196,7 +200,39 @@ void Application::ToggleChatState() {
         Schedule([this]() {
             if (!protocol_->IsAudioChannelOpened()) {
                 SetDeviceState(kDeviceStateConnecting);
-                if (!protocol_->OpenAudioChannel()) {
+                auto* ws_protocol = dynamic_cast<WebsocketProtocol*>(protocol_.get());
+                Settings ws_settings("websocket", false);
+                std::string token = ws_settings.GetString("token");
+                bool ok = false;
+                if (ws_protocol) {
+                    if (!token.empty()) {
+                        ok = ws_protocol->OpenAudioChannelWithToken(websocket_server_url_, token, WEBSOCKET_PROTOCOL_VERSION);
+                    } else {
+                        ESP_LOGW(TAG, "Token is empty; initiating HTTP login to fetch global token");
+                        http_login_start_task([](const char* new_token) {
+                            // Persist token
+                            Settings ws_settings_cb("websocket", true);
+                            ws_settings_cb.SetString("token", new_token);
+
+                            // After login succeeded, open WS and enter listening
+                            Application::GetInstance().Schedule([new_token_str = std::string(new_token)]() {
+                                auto& app = Application::GetInstance();
+                                auto* ws_p = dynamic_cast<WebsocketProtocol*>(app.protocol_.get());
+                                if (!ws_p) return;
+                                ESP_LOGI(TAG, "Connecting WebSocket with freshly obtained token");
+                                if (!ws_p->OpenAudioChannelWithToken(app.websocket_server_url_, new_token_str.c_str(), WEBSOCKET_PROTOCOL_VERSION)) {
+                                    ESP_LOGE(TAG, "WebSocket connect failed after login");
+                                    return;
+                                }
+                                app.SetListeningMode(app.aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+                            });
+                        });
+                        return; // wait login callback to continue
+                    }
+                } else {
+                    ok = protocol_->OpenAudioChannel();
+                }
+                if (!ok) {
                     return;
                 }
             }
@@ -209,6 +245,7 @@ void Application::ToggleChatState() {
         });
     } else if (device_state_ == kDeviceStateListening) {
         Schedule([this]() {
+            closing_by_user_ = true;
             protocol_->CloseAudioChannel();
         });
     }
@@ -233,7 +270,21 @@ void Application::StartListening() {
         Schedule([this]() {
             if (!protocol_->IsAudioChannelOpened()) {
                 SetDeviceState(kDeviceStateConnecting);
-                if (!protocol_->OpenAudioChannel()) {
+                auto* ws_protocol = dynamic_cast<WebsocketProtocol*>(protocol_.get());
+                Settings ws_settings("websocket", false);
+                std::string token = ws_settings.GetString("token");
+                bool ok = false;
+                if (ws_protocol) {
+                    if (!token.empty()) {
+                        ok = ws_protocol->OpenAudioChannelWithToken(websocket_server_url_, token, WEBSOCKET_PROTOCOL_VERSION);
+                    } else {
+                        ESP_LOGW(TAG, "Token is empty when opening WebSocket; falling back to no-token");
+                        ok = ws_protocol->OpenAudioChannelWithToken(websocket_server_url_, "", WEBSOCKET_PROTOCOL_VERSION);
+                    }
+                } else {
+                    ok = protocol_->OpenAudioChannel();
+                }
+                if (!ok) {
                     return;
                 }
             }
@@ -276,6 +327,11 @@ void Application::StopListening() {
 
 void Application::OnLoginSuccess(const char* token) {
     ESP_LOGI(TAG, "Login successful, token: %s", token);
+    // Persist token to NVS for future refresh
+    {
+        Settings ws_settings("websocket", true);
+        ws_settings.SetString("token", token);
+    }
     
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
@@ -292,8 +348,37 @@ void Application::OnLoginSuccess(const char* token) {
     });
 
     protocol_->OnNetworkError([this](const std::string& message) {
+        ESP_LOGE(TAG, "Network error: %s", message.c_str());
         last_error_message_ = message;
         xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
+
+        // 若在连接/监听阶段发生网络错误（包括握手失败），尝试刷新token后重连一次
+        if (device_state_ == kDeviceStateConnecting || device_state_ == kDeviceStateListening) {
+            http_refresh_token_start_task([](const char* new_token) {
+                // Persist refreshed token
+                Settings ws_settings("websocket", true);
+                ws_settings.SetString("token", new_token);
+
+                // Reconnect using refreshed token
+                Application::GetInstance().Schedule([new_token_str = std::string(new_token)]() {
+                    auto& app = Application::GetInstance();
+                    if (!app.protocol_) return;
+                    auto* ws_protocol = dynamic_cast<WebsocketProtocol*>(app.protocol_.get());
+                    if (!ws_protocol) return;
+                    ESP_LOGI(TAG, "Retrying WebSocket connect after token refresh");
+                    if (ws_protocol->OpenAudioChannelWithToken(app.websocket_server_url_, new_token_str.c_str())) {
+                        SystemInfo::PrintHeapStats();
+                        app.SetDeviceState(kDeviceStateIdle);
+                        auto display = Board::GetInstance().GetDisplay();
+                        display->SetChatMessage("system", "网络错误后刷新并重连成功");
+                        app.audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+                    } else {
+                        ESP_LOGE(TAG, "Reconnect after network error with refreshed token failed");
+                        app.Alert(Lang::Strings::ERROR, "网络错误后重连失败", "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
+                    }
+                });
+            });
+        }
     });
     
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
@@ -320,6 +405,89 @@ void Application::OnLoginSuccess(const char* token) {
     
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveMode(true);
+
+        // 手动关闭：不触发刷新/重连，回到空闲
+        if (closing_by_user_) {
+            ESP_LOGI(TAG, "Audio channel closed by user; skipping token refresh");
+            closing_by_user_ = false;
+            Schedule([this]() {
+                if (device_state_ == kDeviceStateListening || device_state_ == kDeviceStateConnecting) {
+                    SetDeviceState(kDeviceStateIdle);
+                }
+            });
+            return;
+        }
+
+        // 若Wi‑Fi未连接，延迟重连，等待链路恢复
+        if (!WifiStation::GetInstance().IsConnected()) {
+            ESP_LOGW(TAG, "Wi‑Fi link down; defer websocket reconnect until Wi‑Fi restores");
+            ws_reconnect_waiting_wifi_ = true;
+            ws_reconnect_next_tick_ = clock_ticks_ + 3; // 3秒后首次尝试
+            Schedule([this]() {
+                auto display = Board::GetInstance().GetDisplay();
+                display->SetChatMessage("system", "网络断开，等待Wi‑Fi恢复后重连");
+            });
+            return;
+        }
+
+        // 非手动关闭：统一尝试自动重连（包括 idle 等状态）
+        DeviceState closed_state = device_state_;
+        // 在重连前设置为 connecting，以触发 OnNetworkError 的刷新重试逻辑
+        SetDeviceState(kDeviceStateConnecting);
+            Settings ws_settings_chk("websocket", false);
+            std::string current_token = ws_settings_chk.GetString("token");
+
+            if (current_token.empty()) {
+                ESP_LOGW(TAG, "Token empty on channel close; initiating login before reconnect");
+                http_login_start_task([](const char* new_token) {
+                    // Persist new token
+                    Settings ws_settings_cb("websocket", true);
+                    ws_settings_cb.SetString("token", new_token);
+
+                    // Reconnect using freshly obtained token
+                    Application::GetInstance().Schedule([new_token_str = std::string(new_token)]() {
+                        auto& app = Application::GetInstance();
+                        if (!app.protocol_) return;
+                        auto* ws_p = dynamic_cast<WebsocketProtocol*>(app.protocol_.get());
+                        if (!ws_p) return;
+                        ESP_LOGI(TAG, "Reconnecting WebSocket after login");
+                        if (ws_p->OpenAudioChannelWithToken(app.websocket_server_url_, new_token_str.c_str(), WEBSOCKET_PROTOCOL_VERSION)) {
+                            SystemInfo::PrintHeapStats();
+                            app.SetDeviceState(kDeviceStateIdle);
+                            auto display = Board::GetInstance().GetDisplay();
+                            display->SetChatMessage("system", "登录并重连成功");
+                            app.audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+                        } else {
+                            ESP_LOGE(TAG, "Reconnect after login failed");
+                            app.Alert(Lang::Strings::ERROR, "登录后重连失败", "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
+                        }
+                    });
+                });
+                return; // 登录后重连由上面的逻辑负责，跳过回到空闲兜底
+            } else {
+                ESP_LOGW(TAG, "Unexpected channel close; attempting auto-reconnect with existing token");
+                // 直接用当前token重连，不触发刷新；如握手失败，将在 OnNetworkError 分支处理刷新
+                Application::GetInstance().Schedule([current_token]() {
+                    auto& app = Application::GetInstance();
+                    if (!app.protocol_) return;
+                    auto* ws_protocol = dynamic_cast<WebsocketProtocol*>(app.protocol_.get());
+                    if (!ws_protocol) return;
+                    if (ws_protocol->OpenAudioChannelWithToken(app.websocket_server_url_, current_token.c_str(), WEBSOCKET_PROTOCOL_VERSION)) {
+                        SystemInfo::PrintHeapStats();
+                        app.SetDeviceState(kDeviceStateIdle);
+                        auto display = Board::GetInstance().GetDisplay();
+                        display->SetChatMessage("system", "自动重连成功");
+                        app.audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+                    } else {
+                        ESP_LOGE(TAG, "Auto-reconnect failed; will fall back to idle and await OnNetworkError handling");
+                        app.Alert(Lang::Strings::ERROR, "自动重连失败", "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
+                        app.SetDeviceState(kDeviceStateIdle);
+                    }
+                });
+                return; // 跳过下面的回到空闲兜底，由上面的逻辑负责
+            }
+        
+        // 默认回到空闲
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
@@ -414,25 +582,11 @@ void Application::OnLoginSuccess(const char* token) {
         }
     });
     
-    // 启动协议并打开音频通道
+    // 启动协议，但不在空闲时常驻连接；仅在需要时（唤醒/开始监听）再建立WS
     if (protocol_->Start()) {
-        // 对于WebSocket协议，我们需要打开音频通道
-        WebsocketProtocol* ws_protocol = dynamic_cast<WebsocketProtocol*>(protocol_.get());
-        if (ws_protocol) {
-            // 使用固定的WebSocket服务器地址和获取到的token
-            if (ws_protocol->OpenAudioChannelWithToken(websocket_server_url_, token)) {
-                SystemInfo::PrintHeapStats();
-                SetDeviceState(kDeviceStateIdle);
-
-                display->SetChatMessage("system", "WebSocket连接成功");
-                // Play the success sound to indicate the device is ready
-                audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
-                // 保持原始行为：不在连接成功后自动进入监听，等待用户或逻辑触发
-            } else {
-                ESP_LOGE(TAG, "Failed to open WebSocket audio channel");
-                Alert(Lang::Strings::ERROR, "WebSocket连接失败", "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
-            }
-        }
+        SetDeviceState(kDeviceStateIdle);
+        display->SetChatMessage("system", "已登录，等待唤醒或开始监听");
+        ESP_LOGI(TAG, "Protocol started without opening WebSocket; will connect on demand");
     } else {
         ESP_LOGE(TAG, "Failed to start WebSocket protocol");
         Alert(Lang::Strings::ERROR, "协议启动失败", "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
@@ -512,12 +666,13 @@ void Application::Start() {
     mcp_server.AddCommonTools();
     mcp_server.AddUserOnlyTools();
 
-    // 直接使用http_login获取token，绕过OTA
+    // 开机检查新版本并自动升级
+    Ota ota;
+    CheckNewVersion(ota);
+
+    // 继续登录与协议初始化
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
-    
-    // 使用C风格回调，保持兼容性
     http_login_start_task([](const char* token) {
-        // 在主线程中处理登录成功后的逻辑
         std::string token_str(token);
         Application::GetInstance().Schedule([token_str]() {
             Application::GetInstance().OnLoginSuccess(token_str.c_str());
@@ -601,6 +756,33 @@ void Application::MainEventLoop() {
                 // SystemInfo::PrintTaskList();
                 SystemInfo::PrintHeapStats();
             }
+
+            // 如果处于等待Wi‑Fi恢复后重连的状态，则在Wi‑Fi恢复时尝试重连
+            if (ws_reconnect_waiting_wifi_) {
+                if (WifiStation::GetInstance().IsConnected() && clock_ticks_ >= ws_reconnect_next_tick_) {
+                    ESP_LOGI(TAG, "Wi‑Fi restored; trying websocket auto‑reconnect");
+                    auto* ws_protocol = dynamic_cast<WebsocketProtocol*>(protocol_.get());
+                    Settings ws_settings("websocket", false);
+                    std::string token = ws_settings.GetString("token");
+                    bool ok = false;
+                    if (ws_protocol) {
+                        ok = ws_protocol->OpenAudioChannelWithToken(websocket_server_url_, token, WEBSOCKET_PROTOCOL_VERSION);
+                    } else if (protocol_) {
+                        ok = protocol_->OpenAudioChannel();
+                    }
+                    if (ok) {
+                        SystemInfo::PrintHeapStats();
+                        SetDeviceState(kDeviceStateIdle);
+                        display->SetChatMessage("system", "Wi‑Fi恢复后自动重连成功");
+                        audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+                        ws_reconnect_waiting_wifi_ = false;
+                    } else {
+                        ESP_LOGW(TAG, "Websocket reconnect failed after Wi‑Fi restore; will retry later");
+                        display->SetChatMessage("system", "自动重连失败，稍后重试");
+                        ws_reconnect_next_tick_ = clock_ticks_ + 5; // 5秒后再次尝试
+                    }
+                }
+            }
         }
     }
 }
@@ -615,10 +797,52 @@ void Application::OnWakeWordDetected() {
 
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
-            if (!protocol_->OpenAudioChannel()) {
-                audio_service_.EnableWakeWordDetection(true);
-                return;
-            }
+            auto* ws_protocol = dynamic_cast<WebsocketProtocol*>(protocol_.get());
+            Settings ws_settings("websocket", false);
+            std::string token = ws_settings.GetString("token");
+                bool ok = false;
+                if (ws_protocol) {
+                    if (!token.empty()) {
+                        ok = ws_protocol->OpenAudioChannelWithToken(websocket_server_url_, token, WEBSOCKET_PROTOCOL_VERSION);
+                    } else {
+                        ESP_LOGW(TAG, "Token is empty; initiating HTTP login to fetch global token");
+                        http_login_start_task([](const char* new_token) {
+                            Settings ws_settings_cb("websocket", true);
+                            ws_settings_cb.SetString("token", new_token);
+
+                            Application::GetInstance().Schedule([new_token_str = std::string(new_token)]() {
+                                auto& app = Application::GetInstance();
+                                auto* ws_p = dynamic_cast<WebsocketProtocol*>(app.protocol_.get());
+                                if (!ws_p) return;
+                                ESP_LOGI(TAG, "Connecting WebSocket with freshly obtained token");
+                                if (!ws_p->OpenAudioChannelWithToken(app.websocket_server_url_, new_token_str.c_str(), WEBSOCKET_PROTOCOL_VERSION)) {
+                                    ESP_LOGE(TAG, "WebSocket connect failed after login");
+                                    app.audio_service_.EnableWakeWordDetection(true);
+                                    return;
+                                }
+                                auto wake_word = app.audio_service_.GetLastWakeWord();
+                                ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
+#if CONFIG_USE_AFE_WAKE_WORD || CONFIG_USE_CUSTOM_WAKE_WORD
+                                while (auto packet = app.audio_service_.PopWakeWordPacket()) {
+                                    app.protocol_->SendAudio(std::move(packet));
+                                }
+                                app.protocol_->SendWakeWordDetected(wake_word);
+                                app.SetListeningMode(app.aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+#else
+                                app.SetListeningMode(app.aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+                                app.audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
+#endif
+                            });
+                        });
+                        return; // wait login callback to proceed wake-word flow
+                    }
+                } else {
+                    ok = protocol_->OpenAudioChannel();
+                }
+                if (!ok) {
+                    audio_service_.EnableWakeWordDetection(true);
+                    return;
+                }
         }
 
         auto wake_word = audio_service_.GetLastWakeWord();
@@ -721,6 +945,7 @@ void Application::Reboot() {
     ESP_LOGI(TAG, "Rebooting...");
     // Disconnect the audio channel
     if (protocol_ && protocol_->IsAudioChannelOpened()) {
+        closing_by_user_ = true;
         protocol_->CloseAudioChannel();
     }
     protocol_.reset();
@@ -747,6 +972,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     } else if (device_state_ == kDeviceStateListening) {   
         Schedule([this]() {
             if (protocol_) {
+                closing_by_user_ = true;
                 protocol_->CloseAudioChannel();
             }
         });
@@ -807,6 +1033,7 @@ void Application::SetAecMode(AecMode mode) {
 
         // If the AEC mode is changed, close the audio channel
         if (protocol_ && protocol_->IsAudioChannelOpened()) {
+            closing_by_user_ = true;
             protocol_->CloseAudioChannel();
         }
     });
@@ -814,4 +1041,77 @@ void Application::SetAecMode(AecMode mode) {
 
 void Application::PlaySound(const std::string_view& sound) {
     audio_service_.PlaySound(sound);
+}
+void Application::CheckNewVersion(Ota& ota) {
+    const int MAX_RETRY = 10;
+    int retry_count = 0;
+    int retry_delay = 10;
+
+    auto& board = Board::GetInstance();
+    while (true) {
+        SetDeviceState(kDeviceStateActivating);
+        auto display = board.GetDisplay();
+        display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);
+
+        if (!ota.CheckVersion()) {
+            retry_count++;
+            if (retry_count >= MAX_RETRY) {
+                ESP_LOGE(TAG, "Too many retries, exit version check");
+                return;
+            }
+            char buffer[128];
+            snprintf(buffer, sizeof(buffer), Lang::Strings::CHECK_NEW_VERSION_FAILED, retry_delay, ota.GetCheckVersionUrl().c_str());
+            Alert(Lang::Strings::ERROR, buffer, "sad", Lang::Sounds::OGG_EXCLAMATION);
+            ESP_LOGW(TAG, "Check new version failed, retry in %d seconds (%d/%d)", retry_delay, retry_count, MAX_RETRY);
+            for (int i = 0; i < retry_delay; i++) {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                if (device_state_ == kDeviceStateIdle) {
+                    break;
+                }
+            }
+            retry_delay *= 2;
+            continue;
+        }
+        retry_count = 0;
+        retry_delay = 10;
+
+        if (ota.HasNewVersion()) {
+            Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "happy", Lang::Sounds::OGG_UPGRADE);
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            SetDeviceState(kDeviceStateUpgrading);
+            display->SetEmotion("download");
+            std::string message = std::string(Lang::Strings::NEW_VERSION) + ota.GetFirmwareVersion();
+            display->SetChatMessage("system", message.c_str());
+
+            board.SetPowerSaveMode(false);
+            audio_service_.Stop();
+            vTaskDelay(pdMS_TO_TICKS(1000));
+
+            bool upgrade_success = ota.StartUpgrade([display](int progress, size_t speed) {
+                std::thread([display, progress, speed]() {
+                    char buffer[32];
+                    snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
+                    display->SetChatMessage("system", buffer);
+                }).detach();
+            });
+
+            if (!upgrade_success) {
+                ESP_LOGE(TAG, "Firmware upgrade failed, restarting audio service and continuing operation...");
+                audio_service_.Start();
+                board.SetPowerSaveMode(true);
+                Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "sad", Lang::Sounds::OGG_EXCLAMATION);
+                vTaskDelay(pdMS_TO_TICKS(3000));
+            } else {
+                ESP_LOGI(TAG, "Firmware upgrade successful, rebooting...");
+                display->SetChatMessage("system", "Upgrade successful, rebooting...");
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                Reboot();
+                return;
+            }
+        }
+
+        ota.MarkCurrentVersionValid();
+        xEventGroupSetBits(event_group_, MAIN_EVENT_CHECK_NEW_VERSION_DONE);
+        break;
+    }
 }
