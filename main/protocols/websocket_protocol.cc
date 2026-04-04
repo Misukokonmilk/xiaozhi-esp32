@@ -9,6 +9,7 @@
 #include <cJSON.h>
 #include <esp_log.h>
 #include <arpa/inet.h>
+#include <network_interface.h>
 #include "assets/lang_config.h"
 
 #define TAG "WS"
@@ -161,7 +162,7 @@ bool WebsocketProtocol::OpenAudioChannelWithToken(const std::string& url, const 
                         return;
                     }
                     if (len < offset + payload_size) {
-                        ESP_LOGE(TAG, "Truncated v2 packet: header=%d, len=%d, payload=%u", (int)offset, (int)len, payload_size);
+                        ESP_LOGE(TAG, "Truncated v2 packet: header=%d, len=%d, payload=%lu", (int)offset, (int)len, (unsigned long)payload_size);
                         return;
                     }
 

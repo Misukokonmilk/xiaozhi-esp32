@@ -204,7 +204,7 @@ void AudioService::OpusDecodeTask() {
         // 载荷健壮性校验，避免异常巨大包触发 length_error/内存碎片化
         const size_t payload_size = packet->payload.size();
         if (payload_size == 0 || payload_size > MAX_OPUS_PAYLOAD_SIZE) {
-            ESP_LOGE(TAG, "Invalid opus payload size: %u, dropping (sr=%d, ts=%u)", (unsigned)payload_size, sample_rate, timestamp);
+            ESP_LOGE(TAG, "Invalid opus payload size: %lu, dropping (sr=%d, ts=%lu)", (unsigned long)payload_size, sample_rate, (unsigned long)timestamp);
             continue;
         }
 
@@ -213,8 +213,8 @@ void AudioService::OpusDecodeTask() {
         payload_copy.resize(payload_size);
         memcpy(payload_copy.data(), packet->payload.data(), payload_size);
         
-        ESP_LOGV(TAG, "Processing packet: payload_size=%d, sample_rate=%d, timestamp=%u", 
-                 payload_copy.size(), sample_rate, timestamp);
+        ESP_LOGV(TAG, "Processing packet: payload_size=%d, sample_rate=%d, timestamp=%lu",
+                 payload_copy.size(), sample_rate, (unsigned long)timestamp);
         
         // 不再手动清理payload，直接让packet在作用域结束时自然析构
         // 这样避免了手动调用clear()和shrink_to_fit()可能导致的内存问题
@@ -230,8 +230,8 @@ void AudioService::OpusDecodeTask() {
 
         SetDecodeSampleRate(sample_rate, frame_duration);
         
-        ESP_LOGD(TAG, "Decoding packet: size=%d, sample_rate=%d, timestamp=%u", 
-                 payload_copy.size(), sample_rate, timestamp);
+        ESP_LOGD(TAG, "Decoding packet: size=%d, sample_rate=%d, timestamp=%lu",
+                 payload_copy.size(), sample_rate, (unsigned long)timestamp);
         
         if (opus_decoder_->Decode(std::move(payload_copy), task->pcm)) {
             ESP_LOGV(TAG, "Successfully decoded packet to %d PCM samples", task->pcm.size());
@@ -256,8 +256,8 @@ void AudioService::OpusDecodeTask() {
                 }
             }
         } else {
-            ESP_LOGE(TAG, "Failed to decode audio packet (timestamp=%u, size=%d)", 
-                     timestamp, payload_copy.size());
+            ESP_LOGE(TAG, "Failed to decode audio packet (timestamp=%lu, size=%d)",
+                     (unsigned long)timestamp, payload_copy.size());
         }
     }
 
@@ -479,9 +479,9 @@ void AudioService::OpusCodecTask() {
         // 每5秒打印一次性能统计
         uint32_t current_time = esp_log_timestamp();
         if (current_time - last_performance_log_time > 5000) {
-            ESP_LOGD(TAG, "Encoding performance: %d packets in last 5s. Queue sizes: encode=%d, send=%d",
-                     encode_count_since_last_log,
-                     audio_encode_queue_.size(), audio_send_queue_.size());
+            ESP_LOGD(TAG, "Encoding performance: %d packets in last 5s. Queue sizes: encode=%u, send=%u",
+                     (int)encode_count_since_last_log,
+                     (unsigned)audio_encode_queue_.size(), (unsigned)audio_send_queue_.size());
             last_performance_log_time = current_time;
             encode_count_since_last_log = 0;
         }

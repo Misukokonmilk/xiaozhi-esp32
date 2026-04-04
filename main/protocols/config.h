@@ -8,6 +8,11 @@ extern "C" {
 // HTTP Login Server Configuration
 #define HTTP_LOGIN_SERVER_HOST "47.109.195.63"
 #define HTTP_LOGIN_SERVER_PORT 17777
+// HTTP Login endpoint and credentials (Starfire server)
+#define HTTP_LOGIN_ENDPOINT "/login"
+#define HTTP_LOGIN_USERNAME "sf11"
+#define HTTP_LOGIN_PASSWORD "123456"
+#define HTTP_LOGIN_TOKEN_JSON_FIELD "token"
 // HTTP Refresh endpoint path
 #define HTTP_REFRESH_ENDPOINT "/auth/refresh"
 // Refresh server URL: fetch new token from this endpoint

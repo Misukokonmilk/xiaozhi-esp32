@@ -9,6 +9,7 @@
 #include <spi_flash_mmap.h>
 #include <esp_timer.h>
 #include <cbin_font.h>
+#include <network_interface.h>
 
 
 #define TAG "Assets"

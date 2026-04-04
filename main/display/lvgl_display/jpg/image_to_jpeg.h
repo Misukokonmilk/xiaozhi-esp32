@@ -6,6 +6,11 @@
 
 #include <stdint.h>
 #include <stddef.h>
+
+// This file requires esp_camera.h for pixformat_t and camera_fb_t types.
+// Only available when esp32-camera component is present.
+#ifdef HAS_ESP_CAMERA
+
 #include <esp_camera.h>  // 包含ESP32相机驱动的定义，避免重复定义pixformat_t和camera_fb_t
 
 #ifdef __cplusplus
@@ -60,6 +65,8 @@ bool image_to_jpeg(uint8_t *src, size_t src_len, uint16_t width, uint16_t height
  */
 bool image_to_jpeg_cb(uint8_t *src, size_t src_len, uint16_t width, uint16_t height, 
                       pixformat_t format, uint8_t quality, jpg_out_cb cb, void *arg);
+
+#endif // HAS_ESP_CAMERA
 
 #ifdef __cplusplus
 }

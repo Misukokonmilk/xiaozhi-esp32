@@ -10,6 +10,7 @@ dependencies:
 
   # Network
   78/esp-wifi-connect: ~2.5.2
+  78/esp-ml307: ~3.3.5  # Required for NetworkInterface, Http, WebSocket base classes
 
   # Audio
   78/esp-opus-encoder: ~2.4.1
@@ -27,6 +28,9 @@ dependencies:
 
   # Input
   espressif/button: ~4.1.3
+
+  # Battery
+  espressif/adc_battery_estimation: ^0.2.1
 
   ## Required IDF version
   idf:

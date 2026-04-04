@@ -14,8 +14,9 @@ set(SOURCES "audio/audio_codec.cc"
             "display/lvgl_display/lvgl_image.cc"
             "display/lvgl_display/gif/lvgl_gif.cc"
             "display/lvgl_display/gif/gifdec.c"
-            "display/lvgl_display/jpg/image_to_jpeg.cpp"
-            "display/lvgl_display/jpg/jpeg_encoder.cpp"
+            # jpg/ sources removed — require esp_camera.h which is unavailable without camera component
+            # "display/lvgl_display/jpg/image_to_jpeg.cpp"
+            # "display/lvgl_display/jpg/jpeg_encoder.cpp"
             "protocols/protocol.cc"
             "protocols/websocket_protocol.cc"
             "protocols/http_login.cc"
@@ -30,7 +31,7 @@ set(SOURCES "audio/audio_codec.cc"
             "main.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "protocols")
+set(INCLUDE_DIRS "." "display" "display/lvgl_display" "audio" "protocols")
 
 # Add board common files
 file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)

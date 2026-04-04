@@ -5,6 +5,7 @@
 #include "protocols/config.h"
 
 #include <cJSON.h>
+#include <cstring>
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <sys/time.h>
@@ -32,31 +33,22 @@ std::string Ota::GetCheckVersionUrl() {
     return url;
 }
 
-std::unique_ptr<Http> Ota::SetupHttp() {
-    auto& board = Board::GetInstance();
-    auto network = board.GetNetwork();
-    auto http = network->CreateHttp(0);
-    auto user_agent = SystemInfo::GetUserAgent();
-    http->SetHeader("Activation-Version", has_serial_number_ ? "2" : "1");
-    http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
-    http->SetHeader("Client-Id", board.GetUuid());
-    http->SetHeader("Client-Platform", CLIENT_PLATFORM);
-    http->SetHeader("Device-Type", DEVICE_TYPE);
-    if (has_serial_number_) {
-        http->SetHeader("Serial-Number", serial_number_.c_str());
-        ESP_LOGI(TAG, "Setup HTTP, User-Agent: %s, Serial-Number: %s", user_agent.c_str(), serial_number_.c_str());
-    }
-    http->SetHeader("User-Agent", user_agent);
-    http->SetHeader("Accept-Language", Lang::CODE);
-    http->SetHeader("Content-Type", "application/json");
-
-    return http;
-}
+// SetupHttp removed: Http class from network_interface.h was removed during slimming.
+// OTA version check is disabled for Starfire server standalone mode.
+// If OTA is needed in the future, rewrite using esp_http_client directly.
 
 /* 
  * Specification: https://ccnphfhqs21z.feishu.cn/wiki/FjW6wZmisimNBBkov6OcmfvknVd
+ * DISABLED: OTA check requires Http class from network_interface.h which was removed.
+ * Returns true (check succeeded, no new version) so the device proceeds to login.
  */
 bool Ota::CheckVersion() {
+    ESP_LOGI(TAG, "OTA version check skipped (not available for Starfire server)");
+    return true;
+}
+
+#if 0 // OTA check disabled — original implementation below
+bool Ota::CheckVersionDisabled() {
     auto& board = Board::GetInstance();
     auto app_desc = esp_app_get_description();
 
@@ -224,6 +216,7 @@ bool Ota::CheckVersion() {
     cJSON_Delete(root);
     return true;
 }
+#endif // OTA check disabled
 
 void Ota::MarkCurrentVersionValid() {
     auto partition = esp_ota_get_running_partition();
@@ -246,6 +239,12 @@ void Ota::MarkCurrentVersionValid() {
 }
 
 bool Ota::Upgrade(const std::string& firmware_url) {
+    ESP_LOGW(TAG, "OTA upgrade disabled (Http/network_interface not available)");
+    return false;
+}
+
+#if 0 // OTA Upgrade disabled — original implementation requires Http class
+bool Ota::UpgradeDisabled(const std::string& firmware_url) {
     ESP_LOGI(TAG, "Upgrading firmware from %s", firmware_url.c_str());
     esp_ota_handle_t update_handle = 0;
     auto update_partition = esp_ota_get_next_update_partition(NULL);
@@ -350,6 +349,7 @@ bool Ota::Upgrade(const std::string& firmware_url) {
     ESP_LOGI(TAG, "Firmware upgrade successful");
     return true;
 }
+#endif // OTA Upgrade disabled
 
 bool Ota::StartUpgrade(std::function<void(int progress, size_t speed)> callback) {
     upgrade_callback_ = callback;
@@ -423,6 +423,12 @@ std::string Ota::GetActivationPayload() {
 }
 
 esp_err_t Ota::Activate() {
+    ESP_LOGW(TAG, "OTA activation disabled (Http/network_interface not available)");
+    return ESP_FAIL;
+}
+
+#if 0 // OTA Activate disabled — original implementation requires Http class
+esp_err_t Ota::ActivateDisabled() {
     if (!has_activation_challenge_) {
         ESP_LOGW(TAG, "No activation challenge found");
         return ESP_FAIL;
@@ -457,3 +463,4 @@ esp_err_t Ota::Activate() {
     ESP_LOGI(TAG, "Activation successful");
     return ESP_OK;
 }
+#endif // OTA Activate disabled

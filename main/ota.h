@@ -51,7 +51,8 @@ private:
     std::vector<int> ParseVersion(const std::string& version);
     bool IsNewVersionAvailable(const std::string& currentVersion, const std::string& newVersion);
     std::string GetActivationPayload();
-    std::unique_ptr<Http> SetupHttp();
+    // SetupHttp removed: Http class from network_interface.h was removed during slimming
+    // OTA is disabled for Starfire server standalone mode
 };
 
 #endif // _OTA_H

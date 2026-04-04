@@ -13,6 +13,7 @@
 #include "application.h"
 #include "display.h"
 #include "board.h"
+#include "camera.h"
 #include "settings.h"
 #include "lvgl_theme.h"
 #include "lvgl_display.h"
