@@ -6,20 +6,14 @@ extern "C" {
 #endif
 
 // HTTP Login Server Configuration
-// 配置HTTP登录服务器的地址、端口、登录接口路径以及登录凭据
-// #define HTTP_LOGIN_SERVER_HOST "47.109.29.58"           // HTTP登录服务器主机地址
-// #define HTTP_LOGIN_SERVER_PORT 17777                    // HTTP登录服务器端口
 #define HTTP_LOGIN_SERVER_HOST "47.109.195.63"
 #define HTTP_LOGIN_SERVER_PORT 17777
-// #define HTTP_LOGIN_SERVER_HOST "192.168.31.120"           // HTTP登录服务器主机地址
-// #define HTTP_LOGIN_SERVER_PORT 8000                    // HTTP登录服务器端口
-#define HTTP_LOGIN_ENDPOINT "/login"                    // 登录接口路径
-#define HTTP_LOGIN_USERNAME "sf11"                       // 登录用户名
-#define HTTP_LOGIN_PASSWORD "123456"                    // 登录密码
-#define HTTP_LOGIN_TOKEN_JSON_FIELD "token"             // 服务器返回的token字段名
-// 刷新接口路径（用于通过旧token获取新token）
-#ifndef HTTP_REFRESH_ENDPOINT
+// HTTP Refresh endpoint path
 #define HTTP_REFRESH_ENDPOINT "/auth/refresh"
+// Refresh server URL: fetch new token from this endpoint
+#define HTTP_REFRESH_SERVER_HOST
+#define HTTP_LOGIN_SERVER_HOST + "/login" + HTTP responses:
+// This field is used for token refresh
 #endif
 
 // WebSocket Server Configuration
