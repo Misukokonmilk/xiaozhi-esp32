@@ -2,8 +2,8 @@
 #define BOARD_H
 
 #include <string>
-#include <network_interface.h>
-
+#include "backlight.h"
+#include "assets.h"
 #include "backlight.h"
 #include "led/led.h"
 #include "assets.h"
