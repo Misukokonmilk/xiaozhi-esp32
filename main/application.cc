@@ -962,7 +962,15 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         ToggleChatState();
         Schedule([this, wake_word]() {
             if (protocol_) {
-                protocol_->SendWakeWordDetected(wake_word); 
+                bool short_enough = wake_word.size() <= 12;
+                bool no_space = wake_word.find(' ') == std::string::npos;
+                bool no_paren = wake_word.find('(') == std::string::npos && wake_word.find(')') == std::string::npos;
+                bool no_punct = wake_word.find('，') == std::string::npos && wake_word.find('。') == std::string::npos
+                                && wake_word.find(',') == std::string::npos && wake_word.find('.') == std::string::npos
+                                && wake_word.find('!') == std::string::npos && wake_word.find('?') == std::string::npos;
+                if (short_enough && no_space && no_paren && no_punct) {
+                    protocol_->SendWakeWordDetected(wake_word);
+                }
             }
         }); 
     } else if (device_state_ == kDeviceStateSpeaking) {
