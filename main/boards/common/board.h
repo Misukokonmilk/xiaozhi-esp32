@@ -4,20 +4,11 @@
 #include <string>
 #include "backlight.h"
 #include "assets.h"
-#include "backlight.h"
 #include "led/led.h"
-#include "assets.h"
-
-#ifndef BOARD_H
-#define BOARD_H
-
-#include <string>
 
 class AudioCodec;
 class Display;
 class Camera;
-class Backlight;
-class Led;
 class NetworkInterface;
 
 void* create_board();

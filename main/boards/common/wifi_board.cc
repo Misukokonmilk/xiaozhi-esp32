@@ -9,13 +9,13 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_network.h>
+#include <network_interface.h>
 #include <esp_log.h>
 
 #include <font_awesome.h>
 #include <wifi_station.h>
 #include <wifi_configuration_ap.h>
 #include <ssid_manager.h>
-#include "afsk_demod.h"
 
 static const char *TAG = "WifiBoard";
 
@@ -53,17 +53,6 @@ void WifiBoard::EnterWifiConfigMode() {
     
     // 播报配置 WiFi 的提示
     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "gear", Lang::Sounds::OGG_WIFICONFIG);
-
-    #if CONFIG_USE_ACOUSTIC_WIFI_PROVISIONING
-    auto display = Board::GetInstance().GetDisplay();
-    auto codec = Board::GetInstance().GetAudioCodec();
-    int channel = 1;
-    if (codec) {
-        channel = codec->input_channels();
-    }
-    ESP_LOGI(TAG, "Start receiving WiFi credentials from audio, input channels: %d", channel);
-    audio_wifi_config::ReceiveWifiCredentialsFromAudio(&application, &wifi_ap, display, channel);
-    #endif
     
     // Wait forever until reset after configuration
     while (true) {

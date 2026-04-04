@@ -3,7 +3,6 @@
 #include "display.h"
 #include "system_info.h"
 #include "audio_codec.h"
-#include "mqtt_protocol.h"
 #include "websocket_protocol.h"
 #include "assets/lang_config.h"
 #include "mcp_server.h"

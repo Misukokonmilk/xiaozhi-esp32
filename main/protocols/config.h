@@ -11,10 +11,7 @@ extern "C" {
 // HTTP Refresh endpoint path
 #define HTTP_REFRESH_ENDPOINT "/auth/refresh"
 // Refresh server URL: fetch new token from this endpoint
-#define HTTP_REFRESH_SERVER_HOST
-#define HTTP_LOGIN_SERVER_HOST + "/login" + HTTP responses:
-// This field is used for token refresh
-#endif
+#define HTTP_REFRESH_SERVER_HOST HTTP_LOGIN_SERVER_HOST
 
 // WebSocket Server Configuration
 // 配置WebSocket服务器地址和协议版本
