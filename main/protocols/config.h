@@ -10,7 +10,7 @@ extern "C" {
 #define HTTP_LOGIN_SERVER_PORT 17777
 // HTTP Login endpoint and credentials (Starfire server)
 #define HTTP_LOGIN_ENDPOINT "/login"
-#define HTTP_LOGIN_USERNAME "sf11"
+#define HTTP_LOGIN_USERNAME "sf12"
 #define HTTP_LOGIN_PASSWORD "123456"
 #define HTTP_LOGIN_TOKEN_JSON_FIELD "token"
 // HTTP Refresh endpoint path
@@ -20,7 +20,7 @@ extern "C" {
 
 // WebSocket Server Configuration
 // 配置WebSocket服务器地址和协议版本
-#define WEBSOCKET_PROTOCOL_VERSION 1
+#define WEBSOCKET_PROTOCOL_VERSION 3
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 #define HTTP_SCHEME "http"
@@ -31,6 +31,11 @@ extern "C" {
 // 配置HTTP登录重试次数和重试间隔
 #define HTTP_LOGIN_MAX_RETRIES 5                        // 最大重试次数
 #define HTTP_LOGIN_RETRY_DELAY_MS 5000                  // 重试间隔（毫秒）
+
+// HTTP Refresh Retry Configuration
+// 配置HTTP刷新重试次数和重试间隔
+#define HTTP_REFRESH_MAX_RETRIES 3                        // 最大重试次数
+#define HTTP_REFRESH_RETRY_DELAY_MS 2000                  // 重试间隔（毫秒）
 
 // WebSocket Connection Configuration
 // 配置WebSocket连接参数

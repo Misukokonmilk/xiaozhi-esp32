@@ -102,6 +102,8 @@ private:
     // 在Wi‑Fi断开时延迟WebSocket重连，等待链路恢复
     bool ws_reconnect_waiting_wifi_ = false;
     int ws_reconnect_next_tick_ = 0; // 下一次尝试重连的tick时间戳
+    int ws_reconnect_delay_seconds_ = 1; // 指数退避当前延迟（秒）
+    static const int kMaxReconnectDelay = 30; // 最大重连延迟（秒）
 
     // 新增成员变量：WebSocket服务器地址
     std::string websocket_server_url_ = WEBSOCKET_SERVER_URL; // 使用配置文件中的WebSocket服务器地址

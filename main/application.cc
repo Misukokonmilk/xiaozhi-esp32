@@ -368,12 +368,14 @@ void Application::OnLoginSuccess(const char* token) {
                     if (ws_protocol->OpenAudioChannelWithToken(app.websocket_server_url_, new_token_str.c_str())) {
                         SystemInfo::PrintHeapStats();
                         app.SetDeviceState(kDeviceStateIdle);
+                        app.ws_reconnect_delay_seconds_ = 1; // 重置退避延迟
                         auto display = Board::GetInstance().GetDisplay();
                         display->SetChatMessage("system", "网络错误后刷新并重连成功");
                         app.audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
                     } else {
                         ESP_LOGE(TAG, "Reconnect after network error with refreshed token failed");
                         app.Alert(Lang::Strings::ERROR, "网络错误后重连失败", "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
+                        app.ws_reconnect_delay_seconds_ = (app.ws_reconnect_delay_seconds_ * 2 < app.kMaxReconnectDelay) ? app.ws_reconnect_delay_seconds_ * 2 : app.kMaxReconnectDelay;
                     }
                 });
             });
@@ -421,7 +423,7 @@ void Application::OnLoginSuccess(const char* token) {
         if (!WifiStation::GetInstance().IsConnected()) {
             ESP_LOGW(TAG, "Wi‑Fi link down; defer websocket reconnect until Wi‑Fi restores");
             ws_reconnect_waiting_wifi_ = true;
-            ws_reconnect_next_tick_ = clock_ticks_ + 3; // 3秒后首次尝试
+                    ws_reconnect_next_tick_ = clock_ticks_ + ws_reconnect_delay_seconds_; // 使用退避延迟
             Schedule([this]() {
                 auto display = Board::GetInstance().GetDisplay();
                 display->SetChatMessage("system", "网络断开，等待Wi‑Fi恢复后重连");
@@ -453,12 +455,14 @@ void Application::OnLoginSuccess(const char* token) {
                         if (ws_p->OpenAudioChannelWithToken(app.websocket_server_url_, new_token_str.c_str(), WEBSOCKET_PROTOCOL_VERSION)) {
                             SystemInfo::PrintHeapStats();
                             app.SetDeviceState(kDeviceStateIdle);
+                            app.ws_reconnect_delay_seconds_ = 1; // 重置退避延迟
                             auto display = Board::GetInstance().GetDisplay();
                             display->SetChatMessage("system", "登录并重连成功");
                             app.audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
                         } else {
                             ESP_LOGE(TAG, "Reconnect after login failed");
                             app.Alert(Lang::Strings::ERROR, "登录后重连失败", "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
+                            app.ws_reconnect_delay_seconds_ = (app.ws_reconnect_delay_seconds_ * 2 < app.kMaxReconnectDelay) ? app.ws_reconnect_delay_seconds_ * 2 : app.kMaxReconnectDelay;
                         }
                     });
                 });
@@ -474,6 +478,7 @@ void Application::OnLoginSuccess(const char* token) {
                     if (ws_protocol->OpenAudioChannelWithToken(app.websocket_server_url_, current_token.c_str(), WEBSOCKET_PROTOCOL_VERSION)) {
                         SystemInfo::PrintHeapStats();
                         app.SetDeviceState(kDeviceStateIdle);
+                        app.ws_reconnect_delay_seconds_ = 1; // 重置退避延迟
                         auto display = Board::GetInstance().GetDisplay();
                         display->SetChatMessage("system", "自动重连成功");
                         app.audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
@@ -481,6 +486,7 @@ void Application::OnLoginSuccess(const char* token) {
                         ESP_LOGE(TAG, "Auto-reconnect failed; will fall back to idle and await OnNetworkError handling");
                         app.Alert(Lang::Strings::ERROR, "自动重连失败", "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
                         app.SetDeviceState(kDeviceStateIdle);
+                        app.ws_reconnect_delay_seconds_ = (app.ws_reconnect_delay_seconds_ * 2 < app.kMaxReconnectDelay) ? app.ws_reconnect_delay_seconds_ * 2 : app.kMaxReconnectDelay;
                     }
                 });
                 return; // 跳过下面的回到空闲兜底，由上面的逻辑负责
@@ -775,10 +781,13 @@ void Application::MainEventLoop() {
                         display->SetChatMessage("system", "Wi‑Fi恢复后自动重连成功");
                         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
                         ws_reconnect_waiting_wifi_ = false;
+                        ws_reconnect_delay_seconds_ = 1; // 重置退避延迟
                     } else {
                         ESP_LOGW(TAG, "Websocket reconnect failed after Wi‑Fi restore; will retry later");
                         display->SetChatMessage("system", "自动重连失败，稍后重试");
-                        ws_reconnect_next_tick_ = clock_ticks_ + 5; // 5秒后再次尝试
+                        ws_reconnect_delay_seconds_ = (ws_reconnect_delay_seconds_ * 2 < kMaxReconnectDelay) ? ws_reconnect_delay_seconds_ * 2 : kMaxReconnectDelay;
+                        ws_reconnect_next_tick_ = clock_ticks_ + ws_reconnect_delay_seconds_;
+                        ESP_LOGW(TAG, "Reconnect failed; next attempt in %d seconds", ws_reconnect_delay_seconds_);
                     }
                 }
             }

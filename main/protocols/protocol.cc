@@ -95,7 +95,7 @@ void Protocol::SendBackpressureControl(bool enable_backpressure, int queue_size)
 }
 
 bool Protocol::IsTimeout() const {
-    const int kTimeoutSeconds = 120;
+    const int kTimeoutSeconds = 180;
     auto now = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_incoming_time_);
     bool timeout = duration.count() > kTimeoutSeconds;
