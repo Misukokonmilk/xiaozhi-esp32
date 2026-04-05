@@ -99,7 +99,7 @@ new_index = {
     "multinet_model": {
         "language": "cn",
         "duration": 3000,
-        "threshold": 0.6,
+        "threshold": 0.45,
         "commands": [{"command": "ni hao ling yi", "text": "零一", "action": "wake"}],
     },
     "emoji_collection": [],

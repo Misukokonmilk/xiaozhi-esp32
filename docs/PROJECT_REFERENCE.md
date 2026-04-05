@@ -48,7 +48,7 @@
 | 音频 | 16kHz 单声道, OPUS 编解码 |
 | 连接 | Wi-Fi (WPA2), 无 4G |
 | 表情显示 | EmoteDisplay (`CONFIG_USE_EMOTE_MESSAGE_STYLE`) |
-| 唤醒词 | MultiNet6 "你好零一" (ni hao ling yi), 阈值 0.6 |
+| 唤醒词 | MultiNet7 "你好零一" (ni hao ling yi), 阈值 0.45 |
 
 ### 2.2 板级配置
 
