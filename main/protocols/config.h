@@ -20,7 +20,7 @@ extern "C" {
 
 // WebSocket Server Configuration
 // 配置WebSocket服务器地址和协议版本
-#define WEBSOCKET_PROTOCOL_VERSION 3
+#define WEBSOCKET_PROTOCOL_VERSION 1
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 #define HTTP_SCHEME "http"
