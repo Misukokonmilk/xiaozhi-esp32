@@ -831,9 +831,6 @@ void Application::OnWakeWordDetected() {
                                 auto wake_word = app.audio_service_.GetLastWakeWord();
                                 ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
 #if CONFIG_USE_AFE_WAKE_WORD || CONFIG_USE_CUSTOM_WAKE_WORD
-                                while (auto packet = app.audio_service_.PopWakeWordPacket()) {
-                                    app.protocol_->SendAudio(std::move(packet));
-                                }
                                 app.protocol_->SendWakeWordDetected(wake_word);
                                 app.SetListeningMode(app.aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
 #else
@@ -856,11 +853,7 @@ void Application::OnWakeWordDetected() {
         auto wake_word = audio_service_.GetLastWakeWord();
         ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
 #if CONFIG_USE_AFE_WAKE_WORD || CONFIG_USE_CUSTOM_WAKE_WORD
-        // Encode and send the wake word data to the server
-        while (auto packet = audio_service_.PopWakeWordPacket()) {
-            protocol_->SendAudio(std::move(packet));
-        }
-        // Set the chat state to wake word detected
+        // Notify server that wake word was detected (text only, no audio)
         protocol_->SendWakeWordDetected(wake_word);
         SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
 #else
