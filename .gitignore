@@ -16,3 +16,17 @@ main/mmap_generate_emoji.h
 *.pyc
 *.bin
 mmap_generate_*.h
+build_log*.txt
+build_*.ps1
+read_serial.py
+.sisyphus/
+docs/superpowers/CONTEXT.md
+main/boards/common/camera.h
+scripts/spiffs_assets/check_*.py
+scripts/spiffs_assets/add_multinet.py
+scripts/spiffs_assets/extract_srmodels.py
+scripts/spiffs_assets/find_entry.py
+scripts/spiffs_assets/merge_srmodels.py
+scripts/spiffs_assets/parse_assets.py
+scripts/spiffs_assets/rebuild_with_multinet.py
+scripts/spiffs_assets/verify_srmodels.py
